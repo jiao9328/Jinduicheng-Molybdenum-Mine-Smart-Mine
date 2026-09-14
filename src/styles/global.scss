@@ -1,0 +1,198 @@
+// =============================================================================
+// 全局样式 —— 重置 + 基础排版 + 公共动画
+// =============================================================================
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: $font-title;
+  font-size: $fs-body;
+  color: $text-body;
+  background: $bg-deep;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// 大屏场景下禁用文本选中与拖拽，避免误操作
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+canvas {
+  display: block;
+}
+
+// =============================================================================
+// Element Plus 表格深色适配
+//
+// 组件内的 <style scoped> 无法穿透到 el-table 内部结构，所以这套规则放在全局。
+// 页面只要给 el-table 加 `class="data-table"` 即可，不要在页面里重写一遍。
+//
+// 表头 / 单元格的配色同时以 CSS 变量暴露，供 JS 里的 header-cell-style 引用
+// （见 utils/tableTheme.ts）——避免同一组色值在 SCSS 和 JS 里各写一份。
+// =============================================================================
+
+:root {
+  --table-th-bg: #{rgba($primary, 0.08)};
+  --table-th-text: #{$text-secondary};
+  --table-cell-text: #{$text-body};
+  --table-border: #{$border-soft};
+  --table-fs: #{$fs-small - 1px};
+  --table-hover-bg: #{rgba($primary, 0.08)};
+}
+
+// ---- 底色交给 Element Plus 自己的变量，而不是去盖它的规则 ----
+//
+// el-table 内部的底色不是某条能直接覆盖的规则，而是**组件库按这几个
+// `--el-table-*` 变量算出来的**。先前这里只写了 `background: transparent`，
+// 与组件库的 `.el-table { background-color: var(--el-table-bg-color) }`
+// **同权重**，而组件样式是构建时后注入的 —— 白底赢在注入顺序上，
+// 于是「智能监控」页的两张表（质检记录 / 调度值班与交接班）一直是白底。
+//
+// ⚠️ 选择器**必须是 `.data-table.el-table`**（同一个元素上的两个类），
+// 不能只写 `.data-table`：Element Plus 把这批变量声明在
+// **`.el-table` 自己的块里**（见 theme-chalk 的 `.el-table{--el-table-border-color:…}`），
+// 不是 `:root`，所以 `.data-table` 那份同样会因为权重相同而输在注入顺序上
+// ——这一点踩过，改完一看变量值原封不动。加一个类就稳定压过它。
+//
+// 底色取 `transparent` 而不是别的深色，是为了让 PanelBox 的深蓝面板底透上来：
+// 表格要和面板是**同一块底色**，不能变成面板里嵌一个灰方块
+//（Element Plus 暗色主题给的是 `#141414` 中性灰，和这套深蓝大屏不是一套）。
+.data-table.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: transparent;
+  --el-table-row-hover-bg-color: var(--table-hover-bg);
+  --el-table-border-color: var(--table-border);
+  --el-table-text-color: var(--table-cell-text);
+  --el-table-header-text-color: var(--table-th-text);
+  --el-table-current-row-bg-color: var(--table-hover-bg);
+}
+
+.data-table {
+  height: 100%;
+  background: transparent;
+
+  // el-table 底部那条 1px 描边线
+  .el-table__inner-wrapper::before {
+    display: none;
+  }
+
+  // 兜底：变量管不到的几层（外层容器、行元素、空数据块）显式透明
+  .el-table__body-wrapper,
+  .el-table__header-wrapper,
+  .el-table__row,
+  tr {
+    background: transparent;
+  }
+
+  .el-table__body tr:hover > td.el-table__cell {
+    background: var(--table-hover-bg) !important;
+  }
+
+  // 无数据时的占位块同样要去掉底色
+  .el-table__empty-block {
+    background: transparent;
+  }
+}
+
+// ---------- 公共工具类 ----------
+.g-num {
+  @include numeric;
+}
+
+.g-ellipsis {
+  @include ellipsis;
+}
+
+.g-scroll {
+  @include thin-scrollbar;
+  overflow-y: auto;
+}
+
+// 曾经这里还有一条 `.is-permission-denied`（按钮级无权限的统一灰化外观），
+// 随登录 + 权限体系一起删除。
+
+// ---------- 公共动画 ----------
+@keyframes g-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes g-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/// 告警呼吸灯
+@keyframes g-alarm {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba($red, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba($red, 0);
+  }
+}
+
+/// 扫描线 / 流光
+@keyframes g-scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+/// 面板入场
+@keyframes g-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

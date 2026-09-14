@@ -1,0 +1,251 @@
+/**
+ * 全站页面巡检：逐页打开，收集控制台错误、请求失败，并统计关键元素数量。
+ * 用法：node scripts/check-all-pages.mjs [baseUrl] [--self-test]
+ */
+import { chromium } from 'playwright'
+import { mkdir } from 'node:fs/promises'
+
+const base = process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'http://localhost:4173'
+const outDir = '.snapshots/pages'
+
+/**
+ * 全站路由清单 —— **7 条**，与 `src/router/index.ts` 里的业务路由一一对应。
+ *
+ * 原来还有 5 条 `/module/*` 占位页（顶栏「规划中」Tab 的落点），
+ * 随那些 Tab 一起删除了：本平台的路由现在**条条都有真实页面**，
+ * 不存在「打开是空壳」的地址。所以本表不再有 `占位·` 前缀，
+ * 下面那套「占位页标题反查」的断言也一并删了（它已无对象可测）。
+ *
+ * `/coord-picker` 不在表内：它是开发工具（把三维模型对齐到底图真实地物），
+ * 不是业务页面，不需要参与巡检。
+ */
+const PAGES = [
+  ['/', '综合管控平台'],
+  ['/safety', '安全管理'],
+  ['/production', '生产管理'],
+  ['/equipment', '设备管理'],
+  ['/emergency', '应急救援'],
+  ['/digital-twin', '数字孪生'],
+  ['/decision', '分析决策']
+]
+
+// ---------------------------------------------------------------------------
+// 判据（纯函数，`--self-test` 直接喂合成结论行）
+// ---------------------------------------------------------------------------
+
+/**
+ * 有问题的行。两条口径：
+ *
+ * - **只数真错误**：`接口未就绪` 不算失败——后端没起时接口 404 是预期行为，
+ *   请求层会自动降级到内置数据，把它算成失败等于这个脚本在后台没起时永远红。
+ * - `渲染失败` / `截图失败` / `三维报错面板` 是**带值的说明文字**（正常时是 `null`），
+ *   所以按真值判，不按 `> 0` 判——这是这三列的实际形状。
+ */
+export function 挑问题(rows) {
+  return rows.filter(
+    (row) => row.错误 > 0 || row.渲染失败 || row.截图失败 || row.三维报错面板
+  )
+}
+
+/**
+ * 违规说明数组，空数组 = 通过。
+ *
+ * 除了逐页挑问题，还卡**行数**（防假绿）：巡检一行结论都没产出时，
+ * `挑问题` 拿到的是空数组，脚本会打印「✓ 0 个页面全部通过」并退出 0——
+ * **一个页面都没打开也算通过**，这正是第十三节第 23 条那具「永远绿的壳」的形状。
+ * 行数对不上（页面少了、循环中途退出了）直接判违规。
+ */
+export function 判(rows, 期望页数) {
+  const 违规 = []
+  const 行数 = Array.isArray(rows) ? rows.length : null
+  if (行数 !== 期望页数) {
+    违规.push(
+      `只产出 ${行数 === null ? '非数组' : 行数} 行页面结论，期望 ${期望页数} 行` +
+        '——有页面根本没被打开，这一轮巡检不成立'
+    )
+  }
+  for (const row of 挑问题(Array.isArray(rows) ? rows : [])) {
+    const why = [
+      row.错误 > 0 && `${row.错误} 条错误`,
+      row.渲染失败 && '渲染失败',
+      row.截图失败 && '截图失败',
+      row.三维报错面板 && '三维报错面板'
+    ].filter(Boolean)
+    违规.push(`${row.页面}：${why.join('，')}`)
+  }
+  return 违规
+}
+
+/** 合成一行健康结论 —— 字段与下面 `summary.push` 的形状逐字对应 */
+const 健康行 = (页面) => ({
+  页面,
+  面板: 6,
+  图表: 4,
+  指标卡: 8,
+  三维: true,
+  滚动条: '无',
+  错误: 0,
+  接口未就绪: 3,
+  三维报错面板: null,
+  渲染失败: null,
+  截图失败: null
+})
+const 七页 = () => PAGES.map(([, name]) => 健康行(name))
+
+export const 自证样本 = [
+  { name: '正例·7 页全健康', 行: 七页(), 应报: 0 },
+  {
+    // 这条是口径本身：后端没起时接口 404 是预期行为，不许把它算成失败
+    name: '反例·某页 99 条接口未就绪（后端没起，预期降级）',
+    行: 七页().map((r) => (r.页面 === '安全管理' ? { ...r, 接口未就绪: 99 } : r)),
+    应报: 0
+  },
+  { name: '正例·某页 1 条真错误', 行: 七页().map((r) => (r.页面 === '生产管理' ? { ...r, 错误: 1 } : r)), 应报: 1 },
+  {
+    name: '正例·渲染失败（停渲染循环时抛错）',
+    行: 七页().map((r) => (r.页面 === '数字孪生' ? { ...r, 渲染失败: 'Cannot read properties of undefined' } : r)),
+    应报: 1
+  },
+  {
+    name: '正例·截图失败（超时）',
+    行: 七页().map((r) => (r.页面 === '综合管控平台' ? { ...r, 截图失败: 'Timeout 120000ms exceeded' } : r)),
+    应报: 1
+  },
+  {
+    name: '正例·三维报错面板（Cesium 自己报了错）',
+    行: 七页().map((r) => (r.页面 === '应急救援' ? { ...r, 三维报错面板: 'An error occurred while rendering.' } : r)),
+    应报: 1
+  },
+  { name: '正例·一行结论都没有（巡检空转，最容易冒充绿）', 行: [], 应报: 1 },
+  { name: '正例·只跑了 6 页（少一页）', 行: 七页().slice(0, 6), 应报: 1 },
+  { name: '正例·结论不是数组（读挂了）', 行: null, 应报: 1 }
+]
+
+function 自证() {
+  let 坏 = 0
+  console.log('=== 自证：合成的页面结论行 ===')
+  for (const c of 自证样本) {
+    const 违规 = 判(c.行, PAGES.length)
+    const 报了几条 = 违规.length
+    const ok = c.应报 === 0 ? 报了几条 === 0 : 报了几条 > 0
+    if (!ok) 坏++
+    console.log(`  ${ok ? '✓' : '✗'} ${c.name}`)
+    if (!ok) {
+      console.log(
+        `      期望${c.应报 === 0 ? '不报' : '报红'}，实际报出 ${报了几条} 条：${违规.join('；') || '（无）'}`
+      )
+    }
+  }
+  console.log(坏 ? `\n✗ 自证 ${坏}/${自证样本.length} 项不通过` : `\n✓ 自证 ${自证样本.length} 项全过`)
+  return 坏
+}
+
+if (process.argv.includes('--self-test')) {
+  process.exit(自证() ? 1 : 0)
+}
+
+// ---------------------------------------------------------------------------
+await mkdir(outDir, { recursive: true })
+
+const browser = await chromium.launch({
+  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--max-old-space-size=3072']
+})
+
+const summary = []
+
+for (const [path, name] of PAGES) {
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+  const errs = []
+  const apiMisses = []
+  const failed = []
+
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return
+    const text = m.text().replace(/\s+/g, ' ').slice(0, 110)
+    // 后端未就绪时接口首次 404 是预期行为（请求层会自动降级到内置数据），
+    // 单独归类，不混进真实错误里造成误报
+    if (text.includes('404') || text.includes('/api/')) apiMisses.push(text)
+    else errs.push(text)
+  })
+  page.on('pageerror', (e) => errs.push('PAGEERROR ' + String(e).slice(0, 110)))
+  page.on('requestfailed', (r) => failed.push(r.url().slice(-60)))
+  // 本平台没有登录，直接进页面（登录 + 权限体系已移除，见 README §13）
+
+  await page.goto(base + '/#' + path, { waitUntil: 'domcontentloaded', timeout: 90000 })
+  await page.waitForTimeout(22000)
+
+  const stats = await page.evaluate(() => ({
+    panels: document.querySelectorAll('.panel-box').length,
+    charts: document.querySelectorAll('.echart-box canvas').length,
+    metrics: document.querySelectorAll('.metric-card').length,
+    canvas: !!document.querySelector('#cesium-container canvas'),
+    docHeight: document.documentElement.scrollHeight,
+    winHeight: window.innerHeight
+  }))
+
+  const panel = await page.evaluate(() => {
+    const p = document.querySelector('.cesium-widget-errorPanel')
+    return p && getComputedStyle(p).display !== 'none' ? p.innerText.replace(/\s+/g, ' ').slice(0, 90) : null
+  })
+
+  // 截图前先停掉 Cesium 的渲染循环。
+  //
+  // 它每帧都在重绘，页面永远没有「稳定帧」，Playwright 会一直等到超时
+  // （场景元素一多就必现）。停之前手动渲染一帧，保证截到的是当前画面。
+  //
+  // 这一步和截图都不能让整轮巡检挂掉：单页失败要记进该页的结论里继续跑，
+  // 否则一个页面出问题就看不到后面所有页的结果了。
+  let renderErr = null
+  try {
+    await page.evaluate(() => {
+      const v = window.__cesiumViewer
+      if (v) {
+        v.render()
+        v.useDefaultRenderLoop = false
+      }
+    })
+  } catch (err) {
+    renderErr = String(err.message || err).replace(/\s+/g, ' ').slice(0, 110)
+  }
+  await page.waitForTimeout(800)
+
+  const file = path.replace(/\//g, '_') || '_root'
+  // 软件渲染（CI / 无头）下，重场景合成一帧可能要几十秒，
+  // 默认 30s 不够用，这里放宽
+  let shotErr = null
+  try {
+    await page.screenshot({ path: `${outDir}/${file}.png`, timeout: 120000 })
+  } catch (err) {
+    shotErr = String(err.message || err).replace(/\s+/g, ' ').slice(0, 110)
+  }
+
+  summary.push({
+    页面: name,
+    面板: stats.panels,
+    图表: stats.charts,
+    指标卡: stats.metrics,
+    三维: stats.canvas,
+    滚动条: stats.docHeight > stats.winHeight ? `溢出 ${stats.docHeight - stats.winHeight}px` : '无',
+    错误: errs.length,
+    接口未就绪: apiMisses.length,
+    三维报错面板: panel,
+    渲染失败: renderErr,
+    截图失败: shotErr
+  })
+
+  await page.close()
+}
+
+console.log(JSON.stringify(summary, null, 1))
+await browser.close()
+
+// 退出码：README 说这个脚本「适合接入 CI 做回归」，那就得能让 CI 判成败。
+const 违规 = 判(summary, PAGES.length)
+const 坏行 = 挑问题(summary)
+if (违规.length) {
+  console.error(`\n✗ ${坏行.length}/${summary.length} 个页面有问题：`)
+  for (const m of 违规) console.error(`   ${m}`)
+} else {
+  console.log(`\n✓ ${summary.length} 个页面全部通过`)
+}
+process.exit(违规.length ? 1 : 0)

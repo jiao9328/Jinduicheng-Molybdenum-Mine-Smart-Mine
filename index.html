@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!--
+  `dark` 类必须挂在这里（Element Plus 官方约定）：`main.ts` 引的
+  `element-plus/theme-chalk/dark/css-vars.css` 只是一套 `.dark { --el-* }` 变量，
+  没有这个类就一行都不生效 —— 整个组件库会停在**亮色**主题上。
+
+  这正是「智能监控页的质检记录 / 调度值班与交接班两张表是白底」的病根：
+  el-table 的底色来自 `--el-table-bg-color`（亮色下是纯白），
+  而 `global.scss` 里 `.data-table { background: transparent }` 与组件库自己的
+  `.el-table { background-color: var(--el-table-bg-color) }` **同权重**，
+  组件样式又是构建时后注入的，于是白底赢在注入顺序上。
+
+  全项目只用到 `el-table` / `el-table-column` 两个组件，所以开暗色主题的
+  影响面就是表格本身，不会波及别处。
+-->
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>智慧矿山管理平台</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
