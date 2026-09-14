@@ -3,13 +3,16 @@
  * 用法：node scripts/diagnose-imagery.mjs [url]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
-const url = process.argv[2] || 'http://localhost:4173/#/'
+const url = process.argv[2] || 'http://localhost:8787/#/'
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--max-old-space-size=3072']
 })
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1280, height: 720 } })
 const errs = []
 page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().replace(/\s+/g, ' ').slice(0, 130)) })
 

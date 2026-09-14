@@ -4,7 +4,7 @@
  *
  * 用法：
  *   node scripts/probe-runtime.mjs [url] [outDir]
- * 默认 url=http://localhost:4173/，outDir=./.snapshots
+ * 默认 url=http://localhost:8787/，outDir=./.snapshots
  *
  * ── 它是 probe，不是 check（第 11 节的约定）──
  * `check-*` 判死：带退出码与自证用例；`probe-*` **给人看图/读数，不断言也不该断言**。
@@ -28,12 +28,15 @@
  */
 import { mkdir } from 'node:fs/promises'
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 const 位置参数 = process.argv.slice(2)
-const url = 位置参数[0] || 'http://localhost:4173/'
+const url = 位置参数[0] || 'http://localhost:8787/'
 const outDir = 位置参数[1] || '.snapshots'
 
 await mkdir(outDir, { recursive: true })
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: [
@@ -45,7 +48,7 @@ const browser = await chromium.launch({
   ]
 })
 
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const 真错误 = []
 const 接口未就绪 = []

@@ -24,9 +24,10 @@
  * 就说明对应断言没有分辨力（例如「存在」检查退化成了恒真），脚本即失败。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 const SELF_TEST = process.argv.includes('--self-test')
-const base = process.argv.filter((a) => !a.startsWith('--'))[2] || 'http://localhost:4173'
+const base = process.argv.filter((a) => !a.startsWith('--'))[2] || 'http://localhost:8787'
 
 /**
  * [Tab 文案, 期望路由] —— 与 `config/nav.ts` 的 `HEADER_NAV_LEFT` / `HEADER_NAV_RIGHT`
@@ -56,6 +57,8 @@ const TABS = [
 /** 顶栏第二行的静态分组标题：必须在、必须不可点 */
 const GROUP_TITLES = ['智慧生产系统', '智慧经营系统']
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -64,8 +67,8 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
-// 本平台没有登录，直接进页面（登录 + 权限体系已移除，见 README §13）
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
+// 页面现在默认要登录，会话由上面的 newLoggedInPage 注入（见 lib/session.mjs）
 
 /** 回首页并等顶栏出现。不等三维——顶栏是应用外壳的一部分，出来得很快。 */
 async function home() {

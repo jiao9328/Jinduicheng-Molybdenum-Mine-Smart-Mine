@@ -3,13 +3,16 @@
  * 用法：node scripts/probe-scene.mjs [url]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
-const url = process.argv[2] || 'http://localhost:4173/#/'
+const url = process.argv[2] || 'http://localhost:8787/#/'
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const logs = []
 page.on('console', (m) => logs.push(`${m.type()}: ${m.text().slice(0, 200)}`))

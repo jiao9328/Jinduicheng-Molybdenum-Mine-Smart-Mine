@@ -37,11 +37,12 @@
  * PAGES 里，那里量得更细（三条判据 + 逐页矩形）。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { mkdir } from 'node:fs/promises'
 
 const argv = process.argv.slice(2)
 const selfTest = argv.includes('--self-test')
-const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:4173'
+const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:8787'
 const outDir = '.snapshots/equipment'
 await mkdir(outDir, { recursive: true })
 
@@ -65,6 +66,8 @@ const check = (name, ok, detail = '') => {
   console.log(`  ${ok ? '✓' : '✗'} ${name}${detail ? `：${detail}` : ''}`)
 }
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -73,7 +76,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const errs = []
 const apiMisses = []

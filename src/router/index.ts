@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
+import type { UserRole } from '@/api/auth'
 
 /**
  * 路由 meta 类型扩展。
@@ -11,6 +12,10 @@ declare module 'vue-router' {
     title?: string
     /** 开发工具页：需要填满真实窗口，跳过 1920×1080 等比缩放容器（见 App.vue） */
     fullscreen?: boolean
+    /** 免登录页面。只有登录页标了它 —— 其余页面**默认都要求登录**（见 guard.ts） */
+    public?: boolean
+    /** 允许访问的角色。不写即「登录即可」，写了就按角色拦（见 guard.ts） */
+    roles?: UserRole[]
   }
 }
 
@@ -18,17 +23,36 @@ declare module 'vue-router' {
  * 路由结构见开发指导文档第 10 节
  * 使用 hash 模式：大屏常以静态文件方式部署，无需服务端 rewrite
  *
- * **本平台没有登录，也没有权限校验**：路由整体开放，打开任意地址都能直接看到页面。
- * 曾经每条业务路由都带 `requiresAuth: true` 与 `permission: '<权限码>'`，
- * 由 `router/guard.ts` 在导航前拦一道、不通过跳 `/login` 或 `/403`。
- * 登录 + 权限体系已整体移除（理由与记录见 README §13），meta 里那两个字段随之删除。
+ * **进系统先登录**：除登录页外所有路由都要求已登录，由 `router/guard.ts`
+ * 在导航前拦一道。这里不写 `requiresAuth` 之类的字段是**有意的** ——
+ * 守卫按「默认要求登录、标了 `public` 才放开」判定（fail-closed），
+ * 新增路由忘了加标记只会多要一次登录，而不是悄悄放出一个人人可进的页面。
+ * 「数据管理」额外限制为管理员：`roles: ['admin']`。
+ *
+ * 登录 + 权限体系曾按用户指令整体移除过（README §13 第 4 条），本次按新指令
+ * 加回来，与那条的关系记在 §13 第 30 条。
  */
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    // fullscreen：登录页要做满整个窗口，不能套在 1920×1080 的等比缩放容器里
+    meta: { title: '登录', fullscreen: true, public: true }
+  },
   {
     path: '/',
     name: 'overview',
     component: () => import('@/views/OverviewView.vue'),
     meta: { title: '综合管控平台' }
+  },
+  {
+    // 数据管理：四张台账的增删改查。**只有管理员进得来**，
+    // 且真正的拦截在后端写接口上（前端这道只是不让人白点）
+    path: '/data-admin',
+    name: 'dataAdmin',
+    component: () => import('@/views/DataAdminView.vue'),
+    meta: { title: '数据管理', roles: ['admin'] }
   },
   {
     path: '/safety',

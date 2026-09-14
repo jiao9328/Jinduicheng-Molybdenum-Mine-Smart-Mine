@@ -45,10 +45,11 @@
  * 里，四维切换的遍历也在那里（判据 A/B/C + 注入自证）。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 const argv = process.argv.slice(2)
 const selfTest = argv.includes('--self-test')
-const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:4173'
+const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:8787'
 
 // ===========================================================================
 // 硬编码规格 —— 不从 src 读。脚本去读被测代码的常量，两边一起改就永远绿了。
@@ -118,6 +119,8 @@ const setDiff = (got, want) => {
     .join('、')
 }
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -126,7 +129,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const errs = []
 const apiMisses = []

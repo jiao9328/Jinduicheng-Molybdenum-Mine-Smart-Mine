@@ -19,6 +19,15 @@ public/cesium
 src/types/auto-imports.d.ts
 src/types/components.d.ts
 
+# ---- 数据库文件，不是源码 ----
+#
+# SQLite 库（含 WAL 与 shm 两个伴生文件）由 `npm run db:seed` 生成，
+# 内容全部来自 src/mock/*.ts —— 也就是说**它完全可以重新生成**，
+# 没有任何一条信息是只存在于库里的。入库只会把二进制脏数据带进
+# 版本历史（每改一行就重新落一份整库，git 无法增量压缩）。
+# 另外它装的是 users 表，口令哈希与盐也不该进库。
+server/data/
+
 # ---- 巡检脚本的产出，不是源码 ----
 #
 # 两者都由 scripts/ 下的脚本每次运行时重新生成，体积还大

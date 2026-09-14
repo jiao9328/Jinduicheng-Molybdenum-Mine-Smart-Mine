@@ -42,9 +42,10 @@
  *    但一次跑要 2~3 分钟，浏览器起不来会超时失败（那就修环境，不是放宽判据）。
  *
  * 用法：node scripts/check-terrain-levels.mjs [url] [--self-test]
- * 默认 http://localhost:4173
+ * 默认 http://localhost:8787（巡检现在要登录，所以得打后端，见 lib/session.mjs）
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 /** Cesium `traversalQuadsByLevel` 数组长 31，合法下标 0~30。写死——这是 Cesium 的事实。 */
 export const 层级硬上限 = 30
@@ -174,13 +175,15 @@ if (process.argv.includes('--self-test')) {
   process.exit(自证() ? 1 : 0)
 }
 
-const base = process.argv[2] || 'http://localhost:4173'
+const base = process.argv[2] || 'http://localhost:8787'
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
+
+const session = await login(base)
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 })
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1280, height: 800 } })
 const 页面错 = []
 page.on('pageerror', (e) => 页面错.push(String(e.stack || e).replace(/\s+/g, ' ').slice(0, 300)))
 

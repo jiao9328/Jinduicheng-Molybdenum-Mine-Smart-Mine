@@ -32,13 +32,16 @@
  * 用法：node scripts/check-scene-load.mjs [baseUrl]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
-const base = process.argv[2] || 'http://localhost:4173'
+const base = process.argv[2] || 'http://localhost:8787'
 
 /** A3 的耗时上限（ms）。实测 1.1s，放宽到 20s：够抓「永远建不完」，又不受慢机器影响 */
 const BUILD_BUDGET_MS = 20000
 /** 原破坏性兜底的触发窗口（ms）。必须跨过它再验 B，否则测不到 */
 const FALLBACK_WINDOW_MS = 12000
+
+const session = await login(base)
 
 const browser = await chromium.launch({
   args: [
@@ -48,7 +51,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 // 收集建场景期间的关键日志
 const terrainLogs = []

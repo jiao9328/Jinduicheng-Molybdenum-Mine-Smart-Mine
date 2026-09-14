@@ -9,6 +9,7 @@
  * 用法：node scripts/check-layout.mjs [url] [--self-test]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 /** 上下留白上限（px）。原判据就是 `> 8`，这里只是给它一个名字。 */
 export const 留白上限 = 8
@@ -117,7 +118,7 @@ if (process.argv.includes('--self-test')) {
 }
 
 // ---------------------------------------------------------------------------
-const base = (process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'http://localhost:4173').replace(/\/$/, '')
+const base = (process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'http://localhost:8787').replace(/\/$/, '')
 
 const SIZES = [
   [1920, 1080, '设计稿尺寸'],
@@ -128,6 +129,8 @@ const SIZES = [
   [3840, 1080, '超宽拼接屏']
 ]
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--max-old-space-size=3072']
 })
@@ -135,8 +138,8 @@ const browser = await chromium.launch({
 const 全部违规 = []
 
 for (const [W, H, label] of SIZES) {
-  const page = await browser.newPage({ viewport: { width: W, height: H } })
-  // 本平台没有登录，直接进页面（登录 + 权限体系已移除，见 README §13）
+  const page = await newLoggedInPage(browser, session, { viewport: { width: W, height: H } })
+  // 页面现在默认要登录，会话由上面的 newLoggedInPage 注入（见 lib/session.mjs）
   await page.goto(base + '/#/', { waitUntil: 'domcontentloaded', timeout: 90000 })
   await page.waitForTimeout(14000)
 
@@ -175,8 +178,15 @@ for (const [W, H, label] of SIZES) {
 
   // 截图只留设计稿尺寸那一档。原来写的是 `W === 1920`，把「矮屏 1920×950」
   // 也算进去了，两档写同一个文件、后一张覆盖前一张。
+  //
+  // ⚠️ 必须显式给 timeout。默认 30s（Playwright 缺省）在软件渲染下不够——
+  // 2026-09-14 就因此红过一次：截图前的量测与 `判()` **已经全部跑完并通过**，
+  // 卡死在 `waiting for fonts to load` 上。给足时间只是让这一帧画出来，
+  // **不改变任何判据**（本脚本的判据只有 `判()` 一处，它在截图之前就求值完了），
+  // 所以这里放宽不会掩盖任何布局缺陷——纯粹是出图步骤在拖后腿。
+  // `check-all-pages.mjs` 遇到过同一个坑，同样是 120000。
   if (label === '设计稿尺寸') {
-    await page.screenshot({ path: '.snapshots/_layout_1920x1080.png' })
+    await page.screenshot({ path: '.snapshots/_layout_1920x1080.png', timeout: 120000 })
   }
   await page.close()
 }

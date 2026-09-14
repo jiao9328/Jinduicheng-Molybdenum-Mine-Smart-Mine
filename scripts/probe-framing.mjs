@@ -27,10 +27,13 @@
  *      （截图取的是 **Cesium canvas 层**，不含 HTML 面板——面板是 DOM，不在 canvas 里）
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
-const url = process.argv[2] || 'http://localhost:4173/#/'
+const url = process.argv[2] || 'http://localhost:8787/#/'
 mkdirSync('.snapshots', { recursive: true })
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: [
@@ -40,7 +43,7 @@ const browser = await chromium.launch({
     '--ignore-gpu-blocklist'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 // 日志一条都不许过滤：整站白屏时唯一那行报错就在这里（probe-plant.mjs 的教训）
 const logs = []

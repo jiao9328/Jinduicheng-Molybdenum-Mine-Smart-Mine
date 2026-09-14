@@ -7,16 +7,19 @@
  * 用法：node scripts/probe-grid.mjs [url] [输出文件名]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { PNG } from 'pngjs'
 import { readFileSync, writeFileSync } from 'node:fs'
 
-const url = process.argv[2] || 'http://localhost:4173/#/coord-picker'
+const url = process.argv[2] || 'http://localhost:8787/#/coord-picker'
 const outName = process.argv[3] || 'grid.png'
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--max-old-space-size=3072']
 })
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1400, height: 900 } })
 
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 })
 await page.waitForTimeout(20000)

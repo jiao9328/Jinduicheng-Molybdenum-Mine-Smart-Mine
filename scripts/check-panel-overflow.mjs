@@ -60,10 +60,11 @@
  * 「注入缺陷后仍然全绿」的假红——或者更糟，被当成检查有分辨力。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 const argv = process.argv.slice(2)
 const selfTest = argv.includes('--self-test')
-const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:4173'
+const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:8787'
 
 /** 有面板的页面。坐标拾取工具页与占位页没有面板，不在此列 */
 const PAGES = ['/', '/safety', '/production', '/equipment', '/emergency', '/decision']
@@ -222,10 +223,12 @@ const issuesOf = (p) => {
   return issues
 }
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--max-old-space-size=3072']
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 /** 等页面把面板和图表都排好版 */
 const settle = async (path, selector = '.panel-box', extra = 9000) => {
@@ -462,7 +465,7 @@ const rows = []
 
 if (selfTest) {
   // ------------------------------ 自证模式 ------------------------------
-  // 本平台没有登录，直接进页面（登录 + 权限体系已移除，见 README §13）
+  // 页面现在默认要登录，会话由上面的 newLoggedInPage 注入（见 lib/session.mjs）
 
   // ---- 第一段：首页「产量统计」注入超高图表 ----
   const TARGET = '产量统计'

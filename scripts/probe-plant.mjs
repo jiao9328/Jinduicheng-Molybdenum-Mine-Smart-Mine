@@ -13,11 +13,14 @@
  * 写 0 会让相机的 ENU 参考面落到地下 1.3km，整个构图全错。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { mkdirSync } from 'node:fs'
 
-const url = process.argv[2] || 'http://localhost:4173/#/'
+const url = process.argv[2] || 'http://localhost:8787/#/'
 const OUT = "_out"
 mkdirSync(OUT, { recursive: true })
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: [
@@ -27,7 +30,7 @@ const browser = await chromium.launch({
     '--ignore-gpu-blocklist'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const logs = []
 // **一条都不许过滤。** 上一版这里按 /台地|选矿厂|…/ 过滤，结果整站白屏时

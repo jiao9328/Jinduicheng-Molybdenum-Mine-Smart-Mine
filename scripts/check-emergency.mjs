@@ -29,11 +29,12 @@
  * 而恒红的判据等于没有判据。所以 `/api/` 的失败只计数打印，其余照旧判死。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { mkdir } from 'node:fs/promises'
 
 const argv = process.argv.slice(2)
 const selfTest = argv.includes('--self-test')
-const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:4173'
+const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:8787'
 const outDir = '.snapshots/emergency'
 await mkdir(outDir, { recursive: true })
 
@@ -56,6 +57,8 @@ const check = (name, ok, detail = '') => {
   console.log(`  ${ok ? '✓' : '✗'} ${name}${detail ? `：${detail}` : ''}`)
 }
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -64,7 +67,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 /**
  * 控制台错误与失败请求 —— 但 `/api/*` 的 404 **是设计的一部分**，不算错。
  *
@@ -96,7 +99,7 @@ page.on('response', (r) => {
   else failedUrls.push(line)
 })
 
-// 本平台没有登录，直接进页面（登录 + 权限体系已移除，见 README §13）
+// 页面现在默认要登录，会话由上面的 newLoggedInPage 注入（见 lib/session.mjs）
 await page.goto(base + '/#/emergency', { waitUntil: 'domcontentloaded', timeout: 90000 })
 
 // 等三维底座 + 业务图层都建出来。上一版是盲等 40s —— 快了会在场景没建好时

@@ -14,11 +14,12 @@
  * 用法：node scripts/check-realtime.mjs [baseUrl]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 
 const 位置参数 = process.argv.slice(2).filter((a) => !a.startsWith('--'))
-const base = 位置参数[0] || 'http://localhost:4173'
+const base = 位置参数[0] || 'http://localhost:8787'
 const WS_PORT = 8765
 /** 推送间隔 */
 const PUSH_INTERVAL = Number(位置参数[1]) || 2500
@@ -275,6 +276,8 @@ await new Promise((resolve, reject) => {
 console.log(`✓ 桩服务已启动 ws://localhost:${WS_PORT}/ws`)
 
 // ---------- 2. 打开页面，抓 WS 帧 ----------
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -283,7 +286,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 /** 浏览器侧看到的真实 WS 帧 */
 const frames = { sent: [], received: [] }

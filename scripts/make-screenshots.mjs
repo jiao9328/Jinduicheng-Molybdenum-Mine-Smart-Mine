@@ -30,13 +30,22 @@
  * 三维区里 `globe.baseColor` 占多少（`baseColorShare`），超了就报错、退出码非零。
  * 教训与 §13 那条一样：**「看着正常」不是判据，量出来的才是**。
  *
+ * ## 登录（2026-09-14 加）
+ *
+ * 页面现在默认要登录，所以本脚本先登一次再把会话注入每个页面
+ *（`lib/session.mjs`）。**唯一的例外是登录页自己的那张图** ——
+ * 带着会话去开 `#/login` 会被守卫弹回首页，截出来就成首页了，
+ * 所以那一张用一个不带会话的新页面单独截。
+ *
  * 用法：node scripts/make-screenshots.mjs [baseUrl]
+ *      默认 baseUrl = http://localhost:8787（`npm run build` + `npm run serve`）
  */
 import { chromium } from 'playwright'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { PNG } from 'pngjs'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
-const base = process.argv[2] || 'http://localhost:4173'
+const base = process.argv[2] || 'http://localhost:8787'
 const OUT = 'screenshots'
 
 /**
@@ -78,6 +87,7 @@ const GROUPS = [
   { path: '/emergency', name: 'AI视频分析', shots: [{ file: 'video-analysis' }] },
   { path: '/safety', name: '安全管理', shots: [{ file: 'safety' }] },
   { path: '/equipment', name: '设备管理', shots: [{ file: 'equipment' }] },
+  { path: '/data-admin', name: '数据管理', shots: [{ file: 'data-admin' }] },
   {
     path: '/decision',
     name: '决策指挥',
@@ -163,6 +173,8 @@ function baseColorShare(file, probe) {
   return n ? hit / n : null
 }
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -181,8 +193,36 @@ const sameState = []
 /** 三维区大半是 globe.baseColor 的图 —— 说明底图没上来，截的是个空地球 */
 const blank3d = []
 
-for (const group of GROUPS) {
+// ---------------------------------------------------------------------------
+// 登录页单独截：它必须**不带会话**，否则会被守卫弹回首页
+// ---------------------------------------------------------------------------
+{
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+  try {
+    await page.goto(base + '/#/login', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await page.waitForSelector('.login__card', { timeout: 30000 })
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: `${OUT}/login.png`, timeout: 120000 })
+
+    // 自证「截到的确实是登录页」：读 DOM 而不是看图。
+    // 守卫若把没会话的访问放行了，这里会截到首页而**图看着也正常**
+    const title = await page.locator('.login__title').textContent().catch(() => '')
+    const accounts = await page.locator('.login__demo-item').count()
+    console.log(`✓ ${OUT}/login.png  （登录页）`)
+    console.log(`    标题：${title?.trim() ?? '(无)'} · 演示账号 ${accounts} 个`)
+    if (!title?.trim() || accounts === 0) {
+      emptyShots.push('login（没截到登录卡片，可能被守卫弹走了）')
+    }
+    done++
+  } catch (err) {
+    console.error(`✗ 登录页截图失败：${String(err.message || err).slice(0, 200)}`)
+    failed++
+  }
+  await page.close()
+}
+
+for (const group of GROUPS) {
+  const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
   try {
     await page.goto(base + '/#' + group.path, {
       waitUntil: 'domcontentloaded',

@@ -81,11 +81,12 @@
  * ⚠️ 本脚本**冻结时钟但不停渲染循环**（要出图），与 check-clock-motion.mjs 相反。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { createHash } from 'node:crypto'
 
 const argv = process.argv.slice(2)
 const selfTest = argv.includes('--self-test')
-const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:4173'
+const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:8787'
 const sha = (buf) => createHash('sha1').update(buf).digest('hex').slice(0, 12)
 
 /**
@@ -116,6 +117,8 @@ const PAGES = [
   }
 ]
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -124,7 +127,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const checks = []
 
@@ -579,8 +582,10 @@ await buildScene('/digital-twin', PAGES[0].ready)
 console.log('\n### /digital-twin 边坡动态模拟')
 
 // 切到边坡页签（模拟控件在那块面板里）
-await page.locator('.twin__tab').nth(2).click({ timeout: 10000 })
-await page.waitForSelector('.twin__sim', { timeout: 20000 })
+// 与下面「复位」那处同一个道理：这几个 click 都只是 actionability 等 stable，
+// 不是判据本身，软件渲染下 10s 会不够。三处一起放宽，免得改完一处又卡下一处。
+await page.locator('.twin__tab').nth(2).click({ timeout: 120000 })
+await page.waitForSelector('.twin__sim', { timeout: 60000 })
 
 /** 读 SL-01 的点位、标签文本与模拟进度 */
 const readSim = () =>
@@ -612,7 +617,7 @@ if (at0.error) {
 console.log(`  起手：${at0.label}　进度 ${at0.progress}`)
 
 // 点「开始模拟」，等进度走满（动画自停）
-await page.locator('.twin__sim-btn.is-primary').click({ timeout: 10000 })
+await page.locator('.twin__sim-btn.is-primary').click({ timeout: 120000 })
 await page.waitForFunction(
   () => Number(document.querySelector('.twin__sim')?.dataset.progress) >= 1,
   null,
@@ -659,7 +664,15 @@ checks.push([
 checks.push([`标签读数演到实测值（${at1.label}）`, at1.label.includes('26.4mm')])
 
 // 复位：必须回到基准位置
-await page.locator('.twin__sim-btn', { hasText: '复位' }).click({ timeout: 10000 })
+//
+// ⚠️ 这里的 timeout 必须给足。`复位` 上没有 `:disabled`，永远是可点的，
+// 所以卡住只可能是 Playwright 的 actionability 里那条 **stable**（要求元素矩形
+// 在两个连续动画帧里一致）——软件渲染下 Cesium 渲染循环把主线程占满，
+// 实测同一步里等一张画面等了 **104612ms**，10s 的预算就是这么耗光的。
+// 2026-09-14 就因此红过一次（`locator.click: Timeout 10000ms exceeded`）。
+// 放宽**不削弱判据**：紧接着两条断言仍然卡「复位真的回到基准位置」
+// （偏差 < 0.01m）与「标签归零」——复位要是坏的，它们照样红。
+await page.locator('.twin__sim-btn', { hasText: '复位' }).click({ timeout: 120000 })
 await page.waitForTimeout(600)
 const at2 = await readSim()
 const back = Math.hypot(at2.x - at0.x, at2.y - at0.y, at2.z - at0.z)

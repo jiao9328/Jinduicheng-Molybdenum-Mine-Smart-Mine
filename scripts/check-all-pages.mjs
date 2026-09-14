@@ -3,21 +3,28 @@
  * 用法：node scripts/check-all-pages.mjs [baseUrl] [--self-test]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { mkdir } from 'node:fs/promises'
 
-const base = process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'http://localhost:4173'
+const base = process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'http://localhost:8787'
 const outDir = '.snapshots/pages'
 
 /**
- * 全站路由清单 —— **7 条**，与 `src/router/index.ts` 里的业务路由一一对应。
+ * 全站路由清单 —— **8 条**，与 `src/router/index.ts` 里的业务路由一一对应。
  *
  * 原来还有 5 条 `/module/*` 占位页（顶栏「规划中」Tab 的落点），
  * 随那些 Tab 一起删除了：本平台的路由现在**条条都有真实页面**，
  * 不存在「打开是空壳」的地址。所以本表不再有 `占位·` 前缀，
  * 下面那套「占位页标题反查」的断言也一并删了（它已无对象可测）。
  *
- * `/coord-picker` 不在表内：它是开发工具（把三维模型对齐到底图真实地物），
- * 不是业务页面，不需要参与巡检。
+ * `/data-admin`（数据管理）2026-09-14 加入：它成了真实业务页面，
+ * 而它又最容易悄悄坏掉（表格没渲染、接口全 403），正是该被巡检盯住的类型。
+ * 巡检用 admin 账号登录（见 `lib/session.mjs`），所以进得去。
+ *
+ * 两条**不在表内**：
+ * - `/coord-picker` 是开发工具（把三维模型对齐到底图真实地物），不是业务页面；
+ * - `/login` 是登录页本身。巡检已带会话，打开它会被守卫弹回 `/`，
+ *   于是这一条量的其实是首页，只会让首页被数两遍。
  */
 const PAGES = [
   ['/', '综合管控平台'],
@@ -26,7 +33,8 @@ const PAGES = [
   ['/equipment', '设备管理'],
   ['/emergency', '应急救援'],
   ['/digital-twin', '数字孪生'],
-  ['/decision', '分析决策']
+  ['/decision', '分析决策'],
+  ['/data-admin', '数据管理']
 ]
 
 // ---------------------------------------------------------------------------
@@ -147,6 +155,8 @@ if (process.argv.includes('--self-test')) {
 // ---------------------------------------------------------------------------
 await mkdir(outDir, { recursive: true })
 
+const session = await login(base)
+
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--max-old-space-size=3072']
 })
@@ -154,7 +164,7 @@ const browser = await chromium.launch({
 const summary = []
 
 for (const [path, name] of PAGES) {
-  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+  const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
   const errs = []
   const apiMisses = []
   const failed = []
@@ -169,7 +179,7 @@ for (const [path, name] of PAGES) {
   })
   page.on('pageerror', (e) => errs.push('PAGEERROR ' + String(e).slice(0, 110)))
   page.on('requestfailed', (r) => failed.push(r.url().slice(-60)))
-  // 本平台没有登录，直接进页面（登录 + 权限体系已移除，见 README §13）
+  // 页面现在默认要登录，会话由上面的 newLoggedInPage 注入（见 lib/session.mjs）
 
   await page.goto(base + '/#' + path, { waitUntil: 'domcontentloaded', timeout: 90000 })
   await page.waitForTimeout(22000)

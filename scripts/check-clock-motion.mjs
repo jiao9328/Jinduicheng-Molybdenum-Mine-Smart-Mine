@@ -30,10 +30,13 @@
  * 用法：node scripts/check-clock-motion.mjs [baseUrl]
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { createHash } from 'node:crypto'
 
-const base = process.argv[2] || 'http://localhost:4173'
+const base = process.argv[2] || 'http://localhost:8787'
 const sha = (buf) => createHash('sha1').update(buf).digest('hex').slice(0, 12)
+
+const session = await login(base)
 
 const browser = await chromium.launch({
   args: [
@@ -43,7 +46,7 @@ const browser = await chromium.launch({
     '--js-flags=--max-old-space-size=3072'
   ]
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 
 const checks = []
 

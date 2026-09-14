@@ -58,9 +58,10 @@
  * 5. 底图本身的精度：地形高程取自同一个 manifest，DEM 错了它跟着错。
  *
  * 用法：node scripts/check-ground-cover.mjs [baseUrl] [--self-test]
- *      默认 baseUrl = http://localhost:4173（先 `npm run build` + 起预览）
+ *      默认 baseUrl = http://localhost:8787（先 `npm run build` + `npm run serve`）
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 
 /** 底图上下的判定阈值（米）。小于 1m 的差在 DEM 噪声与渲染精度之内，不当缺陷。 */
 const 阈值 = 1
@@ -322,13 +323,15 @@ if (process.argv.includes('--self-test')) {
   process.exit(selfTest() ? 1 : 0)
 }
 
-const base = process.argv.find((a) => a.startsWith('http')) || 'http://localhost:4173'
+const base = process.argv.find((a) => a.startsWith('http')) || 'http://localhost:8787'
 const log = (...a) => console.error(new Date().toISOString().slice(11, 19), ...a)
+
+const session = await login(base)
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 })
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1280, height: 800 } })
 const 页面错 = []
 page.on('pageerror', (e) => 页面错.push(String(e.stack || e).replace(/\s+/g, ' ').slice(0, 300)))
 

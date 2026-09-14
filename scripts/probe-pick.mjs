@@ -2,14 +2,17 @@
  * 拾取诊断：用 Cesium 的 pick / scene.screenshot，判断三维区到底渲染了什么。
  */
 import { chromium } from 'playwright'
+import { login, newLoggedInPage } from './lib/session.mjs'
 import { writeFileSync } from 'node:fs'
 
-const url = process.argv[2] || 'http://localhost:4173/#/'
+const url = process.argv[2] || 'http://localhost:8787/#/'
+
+const session = await login(new URL(url).origin)
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
 })
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
+const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
 await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 })
 await page.waitForTimeout(6000)
 

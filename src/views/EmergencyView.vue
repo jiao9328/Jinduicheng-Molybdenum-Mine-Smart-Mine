@@ -75,10 +75,19 @@
                 <span class="emergency__hazard-loc">{{ h.location }}</span>
               </div>
               <StatusTag :status="h.status" :text="h.statusText" />
-              <!-- 页面上唯一的写操作。曾经带 v-permission.disable，
-                   登录 + 权限体系移除后它就是普通按钮。 -->
+              <!--
+                页面上唯一的写操作（推进隐患状态 = 改库里的 hazard_disposals）。
+                曾经带 `v-permission.disable`，那套按钮级权限随登录体系一起删掉了；
+                2026-09-14 加回登录与角色后，**不恢复按钮级权限指令**，改为直接
+                按角色不渲染 —— 全站只有两个角色，这里要么能改要么完全不该看到。
+
+                ⚠️ 这只是不让人白点。**真正的拦截在后端**（`requireAdmin`）：
+                把 localStorage 里的 role 改成 admin 就能让这个按钮出现，
+                但点下去照样 403。反过来若不藏，普通用户点一下会看到乐观更新
+                弹回去 + 控制台一条错误 —— 界面在提供一个不可能成功的操作。
+              -->
               <button
-                v-if="HAZARD_NEXT[h.status]"
+                v-if="store.isAdmin && HAZARD_NEXT[h.status]"
                 class="emergency__hazard-act"
                 type="button"
                 @click="onHandleHazard(h)"
@@ -297,6 +306,7 @@ import { sampleGroundHeights } from '@/scene/localTerrain'
 import { MINE_ELEVATION, type SceneWaypoint } from '@/scene/sceneConfig'
 import { areaGradient, barGradient, CHART_COLORS, fadeColor, TEXT_MUTED_COLOR } from '@/utils/chartTheme'
 import { useAsyncData } from '@/hooks/useAsyncData'
+import { useUserStore } from '@/stores/user'
 import * as emergencyApi from '@/api/emergency'
 import type {
   BaseStation,
@@ -386,6 +396,9 @@ const { data: rescueResources } = useAsyncData(emergencyApi.fetchRescueResources
 })
 
 // ---------- 隐患处置（页面上唯一的写操作） ----------
+/** 只为「推进隐患状态」这一个写操作判断角色；本页其余内容两个角色都能看 */
+const store = useUserStore()
+
 /**
  * 状态推进规则：未处理 → 处置中 → 已处置。
  * 已处置是终态，模板据此不渲染按钮（用 `null` 表达，而不是靠文案判断）。
@@ -413,11 +426,14 @@ async function onHandleHazard(hazard: HazardDisposal) {
   )
 
   try {
-    // 后端未就绪时这个调用返回 false（不发请求、不落库），本地状态即最终状态；
-    // 真实接口上线后同一行代码就变成真正的写操作，页面无需改动
+    // 这一行**确实落库了**（2026-09-14 起 `PUT /emergency/hazards/:id/status` 有实现，
+    // 写 `hazard_disposals` 并联动 `statusText`）。当初这里写着「真实接口上线后
+    // 同一行代码就变成真正的写操作，页面无需改动」—— 后来正是如此，一行没改。
     await emergencyApi.updateHazardStatus(hazard.id, next.status)
   } catch (err) {
-    // 只有「参数错误」这类不可降级的失败才会抛到这里：回滚乐观更新
+    // 回滚乐观更新。会抛到这里的是两类：**403（普通用户越权）** 与
+    // 「参数错误」这类不可降级的 4xx。5xx 与 404 会被降级成内置数据、不抛。
+    // 403 那条路径正常走不到 —— 按钮对非管理员根本不渲染（见模板）。
     hazardDisposals.value = previous
     console.error('[emergency] 隐患处置失败，已回滚：', err)
   }

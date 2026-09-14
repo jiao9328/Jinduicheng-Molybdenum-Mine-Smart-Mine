@@ -17,12 +17,17 @@
 import { chromium } from 'playwright'
 import { PNG } from 'pngjs'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { login, newLoggedInPage } from './lib/session.mjs'
 // 只取「在哪」；米制换算写在 page.evaluate 里（Node 作用域进不去浏览器）
 import { BUILDINGS, SILOS, plantPt } from '../src/scene/mineLayout.ts'
 
+/** `#/coord-picker` 也要登录（它不是 `meta.public`），所以先拿令牌再开页面 */
+const BASE = 'http://localhost:8787'
+const session = await login(BASE)
+
 const b = await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--js-flags=--max-old-space-size=3072']})
-const p = await b.newPage({viewport:{width:1400,height:900}})
-await p.goto('http://localhost:4173/#/coord-picker', {waitUntil:'domcontentloaded', timeout:90000})
+const p = await newLoggedInPage(b, session, {viewport:{width:1400,height:900}})
+await p.goto(`${BASE}/#/coord-picker`, {waitUntil:'domcontentloaded', timeout:90000})
 await p.waitForTimeout(20000)
 
 /** 网格原点：厂区中部（局部坐标 (120, -150)，落在 T3 磨浮台地上） */
