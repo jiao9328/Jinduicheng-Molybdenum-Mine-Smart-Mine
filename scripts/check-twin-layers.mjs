@@ -492,16 +492,30 @@ for (const spec of PAGES) {
     }
   }, allPrefixes)
 
-  const n0 = await shoot()
-  await page.waitForTimeout(3000)
-  const n1 = await shoot()
-  const noiseFree = sha(n0) === sha(n1)
+  // 等画面**自己落定**，而不是「隔 3 秒再截一张」。
+  //
+  // 2026-09-14 这一条真的红了（连同下面的 B1 自证一起），根因不是噪声：
+  // 是**底图开始真的拉瓦片了**。修掉「几何误差返 0 → 影像层级塌成 0 级」
+  // 之后，三维区每帧都在收新瓦片（见 README 十三节第 28 条），
+  // 固定 3 秒截的两张图必然不同。
+  //
+  // 原来那个 3 秒之所以一直绿，是因为影像层级被算成 0 级、请求全被透明占位图
+  // 挡了回去，三维区**根本没在加载** —— 判据是绿在故障上的。
+  // 换句话说：这条判据这次红，是它第一次真的在测东西。
+  //
+  // 这正是本文件记过的教训①「窗口不能猜，只能量」。所以改成量到落定为止；
+  // 量不到就如实报红（不无限重试，也不把窗口放宽到永远绿）。
+  const settle = await shootUntilStable(4)
+  const noiseFree = settle.stable
   console.log(
-    `  ${noiseFree ? '✓' : '✗'} 噪声底：全隐藏后连截两张 ${sha(n0)} ${noiseFree ? '=' : '≠'} ${sha(n1)}`
+    `  ${noiseFree ? '✓' : '✗'} 噪声底：全隐藏后连截 ${settle.shots} 张、` +
+      `${Math.round(settle.ms / 1000)}s ` +
+      (noiseFree ? '落定' : `仍未落定（${settle.hash}）`)
   )
-  checks.push([`${spec.path} 噪声底为零（画面静止时逐像素一致）`, noiseFree])
+  checks.push([`${spec.path} 噪声底为零（画面落定后逐像素一致）`, noiseFree])
 
-  const baseline = sha(n0)
+  const baseline = settle.hash
+
 
   // ---- B1. 不存在的前缀：必须**不变**（自证 B 不是恒真） ----
   await setShow('zzz-not-a-layer-', true) // 什么都不命中

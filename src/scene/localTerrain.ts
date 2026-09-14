@@ -50,6 +50,20 @@ const TERRAIN_BASE_URL = 'map-tiles/heights'
  */
 const DEFAULT_FALLBACK_ELEVATION = 1200
 
+/**
+ * 「这一级已经是我们的最深处、再细分也不会更细」的几何误差（米）。
+ *
+ * 语义上它就是 0，但**不能写真 0**：Cesium 会拿这个值当除数去反推影像层级
+ * （`level = round(log2(levelZeroTexel / 误差)) | 0`），除以 0 得 `Infinity`，
+ * 而位运算 `| 0` 把 `Infinity` 归成 **0** —— 影像层级塌到 0 级，
+ * 0 级没缓存 → 透明占位图 → 拉近后底图整片消失。
+ * 详见 `getLevelMaximumGeometricError` 的说明。
+ *
+ * 取 `Number.EPSILON`（最小可分辨正数）：屏幕空间误差事实上是 0（不再细分），
+ * 而算出的影像层级是个极大值，被 Cesium 夹到 `maximumLevel`（17 级，有缓存）。
+ */
+const NO_FURTHER_DETAIL = Number.EPSILON
+
 /** Float32 高程数组的结构描述：每元素 1 个高度值，不做额外缩放 */
 const FLOAT_STRUCTURE = {
   heightScale: 1,
@@ -213,11 +227,22 @@ export class OfflineTerrariumTerrainProvider {
    * 异常直接触发 `scene.renderError` → **Cesium 停止渲染，三维区永久黑屏**。
    * 只在「定位」时复现：相机贴到地面才需要那么深的细分。
    *
-   * 正确做法是到最深处直接给 0：屏幕空间误差恒为 0，细分天然停在
-   * 我们真正有数据的那一级，也不会再去请求更深层的瓦片。
+   * 于是改成到最深处返回 0：屏幕空间误差恒为 0，细分天然停在我们真正有数据的
+   * 那一级。**但 0 又引出第二个坑**——Cesium 除了拿它算屏幕空间误差，
+   * 还拿它**当除数**去反推影像层级（`ImageryLayer.js` 800 行取这个误差，
+   * 1682 行 `level = round(log2(levelZeroTexel / 误差)) | 0`）。
+   * 除数为 0 时是 `Infinity | 0`，而**位运算会把 Infinity 归成 0**（不报错、
+   * 也不是大数），于是渲染中的地球瓦片去要 **0 级影像**；0 级不在离线缓存里
+   * （缓存 12~17 级），`requestImage` 给回透明占位图 → 拉近之后底图整片消失，
+   * 只剩 `globe.baseColor` 的深空色。实测相机离地 300m 时地球只渲染 1 张
+   * 14 级瓦片，影像层级被算成 0。
+   *
+   * 所以「不再有更多细节」要用一个**极小的正数**表达，不能用字面量 0：
+   * 屏幕空间误差≈0（不细分，效果同 0），而算出的影像层级是个极大值，
+   * 被 Cesium 的 `if (imageryLevel > maximumLevel)` 一夹正好落到 17 级（有缓存）。
    */
   getLevelMaximumGeometricError(level: number): number {
-    if (level >= this.maxCachedLevel) return 0
+    if (level >= this.maxCachedLevel) return NO_FURTHER_DETAIL
     // 用 2 ** level 而不是 1 << level：JS 的位运算是 32 位，
     // `1 << 31` 是负数，这里必须撑得住任意深的层级
     return this.levelZeroError / 2 ** level

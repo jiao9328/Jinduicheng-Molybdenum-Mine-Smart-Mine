@@ -19,13 +19,42 @@
  * 停下来是为了截到稳定的一帧（唯一不能停的是 `check-clock-motion.mjs`，
  * 那个要测时钟在走；这里是静态展示图，停掉正合适）。
  *
+ * ## 「三维区是不是空的」要自己量（2026-09-14 补）
+ *
+ * 这脚本一度把十张图都截得「看着正常」、其实三维区是**空地球**：它在
+ * `.panel-box` 出现的瞬间问「这一页有没有三维」，而那是静态骨架（0.5s 就出来），
+ * viewer 要 1.1s 之后才挂上 —— 答成 false，三维页就只等 6 秒，瓦片没到就截图。
+ * 满屏深蓝本来就是这个大屏的底色，所以十张图逐张看都「挺正常」。
+ *
+ * 现在两头都堵上：先等 viewer 再判定（`settle3d`），截完再按像素量一次
+ * 三维区里 `globe.baseColor` 占多少（`baseColorShare`），超了就报错、退出码非零。
+ * 教训与 §13 那条一样：**「看着正常」不是判据，量出来的才是**。
+ *
  * 用法：node scripts/make-screenshots.mjs [baseUrl]
  */
 import { chromium } from 'playwright'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
+import { PNG } from 'pngjs'
 
 const base = process.argv[2] || 'http://localhost:4173'
 const OUT = 'screenshots'
+
+/**
+ * 三维页「瓦片落定」的固定沉降时间（毫秒）。
+ *
+ * 6 秒不够。`.panel-box` 是**静态骨架**、0.5s 就出来了，而 `window.__cesiumViewer`
+ * 要 1.1s 之后才挂上（实测见 `_probe-has3d`）。早先这里是在骨架出现的瞬间就问
+ * 「这一页有没有三维」，于是答 false → 三维页只等 6 秒 → **瓦片还没到就把空地球
+ * 截了下来**：底图整片是 `globe.baseColor`（#07182b）。
+ *
+ * 这种图特别容易被骗过去 —— 满屏深蓝本来就是这个大屏的底色，
+ * 十张图逐张看都「挺正常」，只有跟现场对照才会发现三维区是空的。
+ * 25 秒是实测够用的值；文件末尾的「底图自检」就是防它再犯。
+ */
+const SETTLE_MS = 25000
+
+/** 三维画布里 baseColor 占比超过这个数，就认为「底图根本没上来」 */
+const BLANK_3D_LIMIT = 0.25
 
 /**
  * 截图清单：**按路由分组**，同组只导航一次。
@@ -63,6 +92,77 @@ const GROUPS = [
 
 mkdirSync(OUT, { recursive: true })
 
+/**
+ * 等这一页的三维落定。返回「这一页到底有没有三维」。
+ *
+ * 顺序很重要：**先等 viewer 出现，再问有没有**。反过来问过一次，
+ * 结果是三维页被当成二维页、只等 6 秒（见 `SETTLE_MS` 的说明）。
+ */
+async function settle3d(page, ms = SETTLE_MS) {
+  const has3d = await page
+    .waitForFunction(() => !!window.__cesiumViewer, null, { timeout: 30000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!has3d) return false
+
+  // `tilesLoaded` 在跳机位后的瞬间就是 true（队列还空），单看它不作准；
+  // 这里只是「尽量等它不欠瓦片」，真正保底的是后面那段固定沉降。
+  await page
+    .waitForFunction(() => window.__cesiumViewer?.scene?.globe?.tilesLoaded === true, null, {
+      timeout: 120000
+    })
+    .catch(() => {})
+  await page.waitForTimeout(ms)
+  return true
+}
+
+/** 取画布矩形与 globe.baseColor（都要在截图时现读，不能写死） */
+const globeProbe = (page) =>
+  page.evaluate(() => {
+    const v = window.__cesiumViewer
+    if (!v) return null
+    const r = v.canvas.getBoundingClientRect()
+    const c = v.scene.globe.baseColor
+    return {
+      rect: {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        width: Math.round(r.width),
+        height: Math.round(r.height)
+      },
+      rgb: [
+        Math.round(c.red * 255),
+        Math.round(c.green * 255),
+        Math.round(c.blue * 255)
+      ].join(',')
+    }
+  })
+
+/**
+ * 量画布里有多少像素还是 `globe.baseColor` —— 也就是「底图没上来」的面积。
+ *
+ * 为什么用颜色而不是看图：三维区本来就是深蓝的，肉眼与识图都容易把
+ * 「空地球」读成「正常的科技蓝」。baseColor 是精确值，骗不了人。
+ */
+function baseColorShare(file, probe) {
+  if (!probe) return null
+  const png = PNG.sync.read(readFileSync(file))
+  const X0 = Math.max(0, probe.rect.x)
+  const Y0 = Math.max(0, probe.rect.y)
+  const X1 = Math.min(png.width, probe.rect.x + probe.rect.width)
+  const Y1 = Math.min(png.height, probe.rect.y + probe.rect.height)
+  let n = 0
+  let hit = 0
+  for (let y = Y0; y < Y1; y++) {
+    for (let x = X0; x < X1; x++) {
+      const i = (png.width * y + x) << 2
+      if (`${png.data[i]},${png.data[i + 1]},${png.data[i + 2]}` === probe.rgb) hit++
+      n++
+    }
+  }
+  return n ? hit / n : null
+}
+
 const browser = await chromium.launch({
   args: [
     '--use-gl=angle',
@@ -78,6 +178,8 @@ let failed = 0
 const emptyShots = []
 /** 同一路由下多个态的面板标题集合两两相同的组 —— 说明页签压根没切 */
 const sameState = []
+/** 三维区大半是 globe.baseColor 的图 —— 说明底图没上来，截的是个空地球 */
+const blank3d = []
 
 for (const group of GROUPS) {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
@@ -96,17 +198,17 @@ for (const group of GROUPS) {
     )
 
     // 有三维的页面再等瓦片流式加载落定；没有 viewer 的页面跳过。
-    // `globe.tilesLoaded` 在一次跳机位后的瞬间就是 true（队列还空），
-    // 所以要连着稳定若干帧才算数——这里退一步，只等一个固定沉降时间，
-    // 反正软件渲染下截图本身就要几十秒。
-    const has3d = await page.evaluate(() => !!window.__cesiumViewer)
-    await page.waitForTimeout(has3d ? 25000 : 6000)
+    // 注意先等 viewer 出现再判定（见 `settle3d`）。
+    const has3d = await settle3d(page)
+    if (!has3d) await page.waitForTimeout(6000)
 
     for (const shot of group.shots) {
       if (shot.tab !== undefined) {
         await page.locator(group.tabSelector).nth(shot.tab).click()
-        // 切态后等面板重排 + 三维图层跟着换
-        await page.waitForTimeout(has3d ? 6000 : 2500)
+        // 切态后等面板重排 + 三维图层跟着换。
+        // 换态 = 换机位/换图层，等于重新加载一遍瓦片，所以走同一套落定等待。
+        if (has3d) await settle3d(page)
+        else await page.waitForTimeout(2500)
       }
 
       // 冻结一帧（见文件头说明）
@@ -119,7 +221,13 @@ for (const group of GROUPS) {
       })
       await page.waitForTimeout(800)
 
+      // 截图前现读一次画布矩形与 baseColor，截完拿它量「底图是不是空的」
+      const probe = has3d ? await globeProbe(page) : null
       await page.screenshot({ path: `${OUT}/${shot.file}.png`, timeout: 120000 })
+      const blank = baseColorShare(`${OUT}/${shot.file}.png`, probe)
+      if (blank !== null && blank > BLANK_3D_LIMIT) {
+        blank3d.push(`${shot.file}（三维区 ${(blank * 100).toFixed(0)}% 是 baseColor）`)
+      }
 
       // 顺手把这一帧的面板标题读出来。
       //
@@ -135,6 +243,7 @@ for (const group of GROUPS) {
         `✓ ${OUT}/${shot.file}.png  （${group.name}${shot.tab !== undefined ? ' · 第' + (shot.tab + 1) + '态' : ''}）`
       )
       console.log(`    面板：${titles.join(' / ') || '(一块都没有)'}`)
+      if (blank !== null) console.log(`    三维底图：baseColor 占 ${(blank * 100).toFixed(1)}%`)
       if (!titles.length) emptyShots.push(shot.file)
       done++
     }
@@ -170,6 +279,9 @@ if (sameState.length) {
     `✗ 同一个路由下这几张图的面板集合完全一样，说明页签没切过去：${sameState.join('；')}`
   )
 }
+if (blank3d.length) {
+  console.error(`✗ 这些图的三维区基本是空的（底图没上来），不能进 README：${blank3d.join('、')}`)
+}
 
-const bad = failed || emptyShots.length || sameState.length
+const bad = failed || emptyShots.length || sameState.length || blank3d.length
 process.exit(bad ? 1 : 0)

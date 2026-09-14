@@ -292,7 +292,30 @@ const camBefore = await page.evaluate(() => {
   }
 })
 await clickTool('定位')
-await page.waitForTimeout(6000)
+
+// 等相机**真的动了**为止，而不是「等 6 秒再说」。
+//
+// 那个 6 秒是猜的，而且 2026-09-14 实测它正好卡在边界上：软件渲染下这个页面
+// 现在只有约 1 帧/秒（探针实测 `scene.frameState.frameNumber` 每秒 +1），
+// 一次 `flyTo` 要 4~6 秒才落位 —— 「6 秒后 lon 变了没」于是成了掷硬币，
+// 同一份代码能跑出通过也能跑出失败。判据要问的是「点它会飞过去」，
+// 不是「它在 6 秒内飞过去」，所以等到条件满足即可，不拿帧率当判据。
+//
+// 帧率为什么掉下来了：底图修好之后三维区真的在贴纹理了（见 README 十三节第 28 条）。
+await page
+  .waitForFunction(
+    (b) => {
+      const c = window.__cesiumViewer?.camera?.positionCartographic
+      if (!c) return false
+      const lon = +c.longitude.toFixed(6)
+      const lat = +c.latitude.toFixed(6)
+      return lon !== b.lon || lat !== b.lat
+    },
+    camBefore,
+    { timeout: 45000 }
+  )
+  .catch(() => console.log('  · 「定位」之后 45s 内相机没有移动（下面这条会红）'))
+
 const camAfter = await page.evaluate(() => {
   const c = window.__cesiumViewer.camera
   return {
@@ -490,9 +513,20 @@ check(
 )
 check('下发中按钮禁用（防重复触发）', immediate?.disabled === true)
 
+// 观察窗口从 9000ms 放宽到 30000ms（2026-09-14）。
+//
+// 原来的 9000ms 是照着「三维区没什么可渲染」的时代定的：那种状态下这套下发
+// 演练实测 7063ms 走完，只剩 22% 余量。底图修好后三维区真的在贴纹理，
+// 软件渲染掉到约 1 帧/秒，而**这套演练是按定时器推进的**——
+// 主线程被一帧占住 1 秒，300ms 的定时器就退化成每帧一次，
+// 于是 24 步从 7.2s 拉长到 20s 以上，直接把余量吃光。
+//
+// 这不是把判据放松：它仍然要求「自己走到 done」「三条通道都送满」「停表后不再变」，
+// 而且会把实测耗时打出来。变的只是「给它多少时间去做到」——
+// 拿一个按帧率校准的常数当判据，换个渲染环境就会假红。
 const samples = []
 const t0 = Date.now()
-while (Date.now() - t0 < 9000) {
+while (Date.now() - t0 < 30000) {
   const s = await readCmd()
   if (s) samples.push(s)
   if (s?.state === 'done') break
