@@ -1,6 +1,76 @@
-# 智慧矿山综合管控平台
+# ⛏️ 智慧矿山综合管控平台
 
-金属及非金属矿山智能化综合管控平台的前端大屏系统。围绕**安全管理、生产管理、设备管理、应急救援、数字孪生、分析决策**六大模块，以三维 GIS 为底座，实现一体化的数据呈现与协同管控。
+![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D?style=flat-square&logo=vue.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-6.4-646CFF?style=flat-square&logo=vite&logoColor=white)
+![CesiumJS](https://img.shields.io/badge/CesiumJS-1.140-4FA8DF?style=flat-square)
+![Element Plus](https://img.shields.io/badge/Element_Plus-2.14-409EFF?style=flat-square&logo=element&logoColor=white)
+![ECharts](https://img.shields.io/badge/ECharts-5.6-AA344D?style=flat-square&logo=apacheecharts&logoColor=white)
+![Pinia](https://img.shields.io/badge/Pinia-2.3-FFD859?style=flat-square&logo=pinia&logoColor=black)
+![Sass](https://img.shields.io/badge/Sass-1.104-CC6699?style=flat-square&logo=sass&logoColor=white)
+
+## 📝 项目简介
+
+面向**金属及非金属矿山**的智能化综合管控平台前端大屏系统。以**三维 GIS 为底座**，
+围绕**安全管理、生产管理、设备管理、应急救援、数字孪生、分析决策**六大模块，
+把分散在生产、设备、安全、成本上的人员与数据收进同一块屏幕，实现一体化呈现与协同管控。
+
+- **三维底座是程序化重建的** —— CesiumJS 里按实测 DEM 与影像判读重建金堆城钼矿：
+  露天采坑 7 级台阶 × 25m、顺谷四级分级台地选矿厂、11 条皮带廊、排土场、尾矿库；
+  所有地物**逐点采样 DEM 高程贴地**，不是摆在海平面上。
+- **完全离线可用** —— 矿区现场常常没有外网，所以影像与地形瓦片抓成本地 XYZ 目录
+  （影像 12~17 级、高程 11~14 级）随仓库分发；接口不可用时自动降级到内置数据。
+  断网环境下整个平台仍可完整演示，不依赖任何在线地图服务。
+- **大屏自适应** —— 按 1920×1080 设计稿布局，运行时等比缩放居中，
+  从笔记本到 3840×1080 拼接屏都不塌陷、不出滚动条。
+- **工程门禁** —— 16 个带退出码的巡检脚本 + 7 个探针，把「面板被撑破」「图层没画出来」
+  「坐标跑偏」「底图被悄悄删掉」这类**不报错的缺陷**变成可复现的红绿结论。
+
+## ✨ 核心功能模块 (Features)
+
+| 模块 | 路由 | 主要能力 |
+|---|---|---|
+| 🖥️ 综合首页 | `/` | 三维实景居中 + 左右各 5 块数据面板 + 生产计划进度 + 底部迷你图表 |
+| 🏭 数字孪生 | `/digital-twin` | 全屏实景三维 + 6 个机位飞行 Tab；底部面板切三态（设备效率 / 风险分布 / 边坡监测），**切到哪一态就只显示哪一组图层** |
+| 📹 AI 视频分析 | `/emergency` | 中央三块联动（应急预案匹配 / 一键指令下发 / 最优调配方案）+ 事故类型占比、区域隐患统计、隐患处置列表、避灾路线流动光带 |
+| ⛑️ 安全管理 | `/safety` | 三维风险标注 + 实时数据 / 风险项列表 / 趋势分析 / 类型分布 / 培训资质 / 隐患整改闭环 |
+| ⚙️ 设备管理 | `/equipment` | 5 指标卡 + 评分表 / 趋势预判 / 权重设置 / 备件库存台账 + 周内数据图 / 告警提醒 / 维保工单，点行打开设备档案浮层 |
+| 🧭 决策指挥 | `/decision` | 顶栏四维切换：成本效益（8 块）/ 生产分析 / 安全分析 / 能耗单耗 |
+| 📊 智能监控 | `/production` | 5 指标卡 + 质量活动、质检记录、生产类型分布 + 产量趋势、年度热力图、调度值班与交接班 |
+
+## 📷 系统截图
+
+> 以下截图由 `node scripts/make-screenshots.mjs` 生成，界面改动后重跑即可更新。
+
+**🖥️ 综合首页总览** > 三维实景居中，左右各 5 块数据面板，顶部为双行导航（左「智慧生产系统」/ 右「智慧经营系统」）。
+<img width="1347" alt="综合首页总览" src="./screenshots/overview.png" />
+
+**🏭 数字孪生 · 设备定位与作业效率** > 全屏实景三维 + 底部 6 个机位飞行 Tab，底部面板显示设备定位与效率。
+<img width="1347" alt="数字孪生-设备效率" src="./screenshots/digital-twin.png" />
+
+**⛰️ 数字孪生 · 边坡位移监测与动态模拟** > 切到「边坡监测」态后只显示边坡相关图层，含位移动态模拟。
+<img width="1347" alt="数字孪生-边坡监测" src="./screenshots/slope-monitor.png" />
+
+**⛑️ 安全管理** > 三维风险标注叠加，配合风险项列表、趋势分析、类型分布与隐患整改闭环。
+<img width="1347" alt="安全管理" src="./screenshots/safety.png" />
+
+**📹 AI 视频分析** > 多源画面 + 应急预案匹配 / 一键指令下发 / 最优调配方案三块联动，避灾路线带流动光效。
+<img width="1347" alt="AI视频分析" src="./screenshots/video-analysis.png" />
+
+**⚙️ 设备管理** > 指标卡 + 评分表 / 趋势预判 / 备件库存台账 / 告警提醒 / 维保工单，点行打开设备档案浮层。
+<img width="1347" alt="设备管理" src="./screenshots/equipment.png" />
+
+**📊 智能监控** > 质量活动与质检记录、生产类型分布、产量趋势、年度热力图与调度值班。
+<img width="1347" alt="智能监控" src="./screenshots/monitoring.png" />
+
+**🧭 决策指挥 · 成本效益** > 年度成本对比、前 5 大支出项、各类型成本分布，及维护 / 用水用电 / 人力成本月度趋势。
+<img width="1347" alt="决策指挥-成本效益" src="./screenshots/decision-cost.png" />
+
+**🧭 决策指挥 · 生产分析** > 产量趋势（计划 vs 实际）、设备利用率、工序效率、损失贫化率趋势。
+<img width="1347" alt="决策指挥-生产分析" src="./screenshots/decision-production.png" />
+
+**🧭 决策指挥 · 能耗单耗** > 峰谷平电费、能耗构成、水消耗、单耗趋势、吨成本拆解与单机成本。
+<img width="1347" alt="决策指挥-能耗单耗" src="./screenshots/decision-energy.png" />
 
 ---
 
@@ -41,6 +111,7 @@ npm run typecheck    # 仅做类型检查
 ├── public/
 │   ├── cesium/                  Cesium 运行时资源（postinstall 生成，不入库）
 │   └── map-tiles/               离线卫星底图瓦片（抓取脚本生成）
+├── screenshots/                 README 系统截图（由 make-screenshots.mjs 生成）
 ├── scripts/                     （命名约定见第十一节；`_` 前缀 = 用完即删，不入库）
 │   ├── copy-cesium-assets.mjs   Cesium 资源拷贝（postinstall 自动跑）
 │   ├── fetch-map-tiles.mjs      离线影像与高程瓦片抓取
@@ -62,6 +133,9 @@ npm run typecheck    # 仅做类型检查
 │   ├── check-ground-cover.mjs   地物与底图的遮挡关系（可见面不许被底图盖住 / 底边不许悬空）
 │   ├── check-imagery-placeholder.mjs 底图占位瓦片与 hasAlphaChannel 的自洽性
 │   ├── check-layout.mjs         多分辨率布局体检
+│   ├── check-scene-load.mjs     建场景加载 + 滚轮缩放后底图存活（跨 12s 窗口）
+│   │
+│   ├── make-screenshots.mjs     生成 README 系统截图（产出到 screenshots/）
 │   │
 │   ├── probe-grid.mjs           底图叠加经纬网，供人工判读坐标
 │   ├── verify-alignment.mjs     坐标对齐核验（投影回屏幕 + 米制网格）
@@ -1716,3 +1790,20 @@ docx 里没有、代码里有的东西，按同一基准删除（用户确认的
 让检查脚本能把它当判据量。跨页面的固定常量另有 `check-decision.mjs` 的
 「规格常量」一组断言守着——那一组只防漂移，**强度弱于页面内自洽的算式**，
 README 与脚本注释里都如实标了这一点。
+
+---
+
+## 🤝 说明与许可
+
+本项目为**智慧矿山综合管控平台的演示/交付工程**，公开分享供学习与交流。
+
+- **数据全部为 Mock**，接入真实后端前不具备真实业务能力；页面上的数字按
+  「同一事实只写一遍」组织，派生关系一并写进面板底栏，供巡检脚本当判据量。
+- **三维场景是程序化重建的示意场景**，按实测 DEM 与影像判读生成，偏差约 100m 量级；
+  要真实观感需接入甲方提供的倾斜摄影成果或开启在线实景三维（见第六节）。
+- **本平台没有登录与权限体系**，打开即用。接入真实后端时鉴权必须**重做**而不是补一层——
+  写操作目前在接口层不设防。
+- `.env` 含 Cesium Ion 令牌，未入库；需要时按 `.env.example` 自建。
+
+截图由 `node scripts/make-screenshots.mjs` 生成，界面改动后重跑即可更新。
+问题与建议欢迎在 [Issues](https://github.com/jiao9328/Integrated-Management-Platform-for-Smart-Mines/issues) 提出。
