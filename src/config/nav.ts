@@ -32,7 +32,7 @@ export interface NavItem {
  */
 export const HEADER_NAV_LEFT: NavItem[] = [
   { label: '数字孪生', path: '/digital-twin' },
-  { label: '智能监控', path: '/production' },
+  { label: '智能监控', path: '/monitoring' },
   { label: 'AI视频分析', path: '/emergency' },
   { label: '安全管理', path: '/safety' },
   { label: '设备管理', path: '/equipment' }
@@ -44,13 +44,21 @@ export const HEADER_NAV_LEFT: NavItem[] = [
  * 同样只放有页面的模块。补充件第 2 号列出的「基础管理」「人员管理」「销售管理」
  * 三个 Tab（该件自身也标注为中置信度）已按用户指令移除，理由同左栏。
  *
- * 「决策指挥」与「成本管理」共用 `/decision`：两页内容本就是同一块分析决策页，
- * 硬拆成两个路由只会多出一个空壳。这是**有意为之**，不是漏改。
+ * ⚠️ **这三项曾经只指向两个路由**：「决策指挥」与「成本管理」都写 `/decision`、
+ * 「统计报表」与左栏的「智能监控」都写 `/production`，等于两个 Tab 点进去
+ * 是同一个页面。当时的注释把它说成「有意为之，不是漏改」——那是错的：
+ * 用户的反馈正是「智能监控和统计报表一模一样，决策指挥和成本管理一模一样」。
+ * 而且顶栏高亮判的是 `route.path === item.path`（见 AppHeader），
+ * 所以点「统计报表」时「智能监控」**会同时亮**，重复是肉眼可见的。
+ *
+ * 现在四条 Tab 各指一条独立路由，按「实时 / 历史 / 决策 / 成本」四分：
+ *   智能监控 → 看现在  统计报表 → 看过去  决策指挥 → 看将来  成本管理 → 看花钱
+ * 这四句定位写进各页自己的顶栏副标题，页面之间不再互相重复。
  */
 export const HEADER_NAV_RIGHT: NavItem[] = [
   { label: '决策指挥', path: '/decision' },
-  { label: '成本管理', path: '/decision' },
-  { label: '统计报表', path: '/production' }
+  { label: '成本管理', path: '/cost' },
+  { label: '统计报表', path: '/reports' }
 ]
 
 /**
@@ -82,13 +90,26 @@ export const PRODUCTION_PLANS: PlanProgress[] = [
   { label: '运输计划', current: 600, total: 800, unit: '万车' }
 ]
 
-/** 各模块页面标题（子页面顶栏用） */
+/**
+ * 各模块页面标题（子页面顶栏用）。
+ *
+ * ⚠️ **这里的 title 必须与顶栏 Tab 文案、路由 `meta.title` 三处一致。**
+ * 曾经 `/production` 顶栏 Tab 叫「智能监控」、页面标题却是「生产管理系统」，
+ * 用户点进去的第一反应就是「这不是我要的页面」——标签与页面对不上，
+ * 本身就是一种「重复」的来源。现在三处同名，改一处要同时改三处。
+ */
 export const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   '/': { title: '智慧矿山管理平台', subtitle: 'SMART MINE MANAGEMENT PLATFORM' },
   '/safety': { title: '安全分析系统', subtitle: 'SAFETY ANALYSIS SYSTEM' },
-  '/production': { title: '生产管理系统', subtitle: 'PRODUCTION MANAGEMENT' },
+  // 看现在：所有数据都是「此刻」的快照
+  '/monitoring': { title: '智能监控', subtitle: 'REAL-TIME MONITORING' },
+  // 看过去：日报月报、多维汇总、一键导出
+  '/reports': { title: '统计报表', subtitle: 'STATISTICAL REPORTS' },
+  // 看将来：趋势预测、优化建议、采纳派单
+  '/decision': { title: '决策指挥', subtitle: 'DECISION COMMAND' },
+  // 看花钱：吨成本拆解、峰谷平电费、单机成本、预算执行
+  '/cost': { title: '成本管理', subtitle: 'COST MANAGEMENT' },
   '/equipment': { title: '智能统计分析', subtitle: 'EQUIPMENT INTELLIGENT ANALYSIS' },
   '/emergency': { title: '应急救援指挥', subtitle: 'EMERGENCY RESCUE COMMAND' },
-  '/digital-twin': { title: '数字孪生', subtitle: 'DIGITAL TWIN' },
-  '/decision': { title: '分析决策', subtitle: 'ANALYSIS & DECISION' }
+  '/digital-twin': { title: '数字孪生', subtitle: 'DIGITAL TWIN' }
 }

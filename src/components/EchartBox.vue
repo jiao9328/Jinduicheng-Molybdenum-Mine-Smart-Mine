@@ -1,5 +1,10 @@
 <template>
-  <div ref="el" class="echart-box" :style="{ height: resolvedHeight }" />
+  <div
+    ref="el"
+    class="echart-box"
+    :class="{ 'is-clickable': clickable }"
+    :style="{ height: resolvedHeight }"
+  />
 </template>
 
 <script setup lang="ts">
@@ -93,5 +98,20 @@ defineExpose({
 <style lang="scss" scoped>
 .echart-box {
   width: 100%;
+
+  /**
+   * 可点的图表给手形光标 —— **这一条在组件里改，不在各页面里补**。
+   *
+   * 没有它，图表看上去和不可点的图完全一样，用户唯一能知道「这张图能点」的
+   * 途径是 `#extra` 那行小字；而在大屏上没人会去读面板标题旁边的小字。
+   * 五个页面（监控 / 报表 / 决策 / 成本 / 应急）都有可点图表，
+   * 各补一份必然漏，且改一次要改五处。
+   *
+   * 光标只是**提示**，真正的守卫仍在 `chart.on('click')` 那一层：
+   * 不可点的图（`clickable` 为假）连监听都没挂，点了确实什么都不发生。
+   */
+  &.is-clickable {
+    cursor: pointer;
+  }
 }
 </style>

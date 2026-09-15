@@ -8,9 +8,10 @@
  * ## 为什么要按路由分组
  *
  * 三维页在软件渲染下**每次导航要 30~45 秒**。`/digital-twin` 要出两张图
- *（设备效率 / 边坡监测）、`/decision` 要出三张（三个维度），
- * 一个页签一次导航的话就是五次加载、白白多等两三分钟。
+ *（设备效率 / 边坡监测），一个页签一次导航的话就是两次加载、白白多等半分钟。
  * 所以同一个路由只 `goto` 一次，之后靠点页签换态。
+ * （`/decision` 曾经也是这样：三个维度共用一条路由、点三次页签出三张图。
+ *   现在它和 `/cost` 是两条独立路由，各出一张，页签分组这一层已经不需要了。）
  *
  * ## 截图前的固定动作
  *
@@ -83,21 +84,16 @@ const GROUPS = [
       { file: 'slope-monitor', tab: 2 }
     ]
   },
-  { path: '/production', name: '智能监控', shots: [{ file: 'monitoring' }] },
+  { path: '/monitoring', name: '智能监控', shots: [{ file: 'monitoring' }] },
+  { path: '/reports', name: '统计报表', shots: [{ file: 'reports' }] },
   { path: '/emergency', name: 'AI视频分析', shots: [{ file: 'video-analysis' }] },
   { path: '/safety', name: '安全管理', shots: [{ file: 'safety' }] },
   { path: '/equipment', name: '设备管理', shots: [{ file: 'equipment' }] },
   { path: '/data-admin', name: '数据管理', shots: [{ file: 'data-admin' }] },
-  {
-    path: '/decision',
-    name: '决策指挥',
-    tabSelector: '.decision__dim',
-    shots: [
-      { file: 'decision-cost', tab: 0 },
-      { file: 'decision-production', tab: 1 },
-      { file: 'decision-energy', tab: 3 }
-    ]
-  }
+  // 「决策指挥」与「成本管理」不再共用 /decision，也不再需要页签分组：
+  // 拆成两个页面之后，一次导航出一张图，各是一张完整的大屏
+  { path: '/decision', name: '决策指挥', shots: [{ file: 'decision' }] },
+  { path: '/cost', name: '成本管理', shots: [{ file: 'cost' }] }
 ]
 
 mkdirSync(OUT, { recursive: true })

@@ -1,6 +1,9 @@
 /**
  * 把 `src/mock/*.ts` 里的四类台账灌进 SQLite。**幂等：每次都先清空再灌**。
  *
+ * 库里一共五张业务表：四张有种子（质检记录 / 值班交接班 / 备件台账 / 隐患处置），
+ * 第五张「决策工单」没有种子，但同样会被清空 —— 见下面 `PLAN` 里那条注释。
+ *
  * ## 为什么要绕 esbuild 一圈
  *
  * 种子数据就在 `src/mock/*.ts` 里，那是 TypeScript，Node 直接 import 不了；
@@ -44,17 +47,26 @@ const argOf = (name, fallback) => {
 const DB_FILE = argOf('--db', DB_PATH)
 
 /**
- * 四张表 ↔ mock 数组的对应关系。与 `server/db.mjs` 的 `RESOURCES` 键一一对应，
+ * 表 ↔ mock 数组的对应关系。与 `server/db.mjs` 的 `RESOURCES` 键一一对应，
  * 那边少一张表这边就会在下面 `RESOURCES[key]` 处报错，不会静默漏灌。
+ *
+ * `mockName: null` = **只清空、不灌数据**。决策工单属于这一类：
+ * 它不是一张外部台账，而是页面上「采纳建议」这个动作生成的，没有种子可言。
+ * 但它**必须进这张表** —— 脚本向用户承诺的是「重跑一次就回到干净基线」，
+ * 漏清这张表的话，演示前重跑一次，上一轮点出来的工单还挂在右列。
  */
 const PLAN = [
   { key: 'production/quality-records', mockName: 'qualityRecords' },
   { key: 'production/duty-schedule', mockName: 'dutySchedule' },
   { key: 'equipment/spare-parts', mockName: 'spareParts' },
-  { key: 'emergency/hazard-disposals', mockName: 'hazardDisposals' }
+  { key: 'emergency/hazard-disposals', mockName: 'hazardDisposals' },
+  { key: 'decision/orders', mockName: null }
 ]
 
-/** 把四组数组打包出来。返回 `{ qualityRecords, dutySchedule, ... }` */
+/** 需要灌种子的那几条（`mockName` 非空的），入口文件只打包它们 */
+const SEEDED = PLAN.filter((p) => p.mockName)
+
+/** 把要灌的几组数组打包出来。返回 `{ qualityRecords, dutySchedule, ... }` */
 async function loadMock() {
   const esbuild = await import('esbuild')
   const dir = mkdtempSync(join(tmpdir(), 'mine-seed-'))
@@ -62,7 +74,7 @@ async function loadMock() {
     const entry = join(dir, 'entry.ts')
     writeFileSync(
       entry,
-      PLAN.map(({ key, mockName }) => {
+      SEEDED.map(({ key, mockName }) => {
         const mod = key.split('/')[0]
         return `export { ${mockName} } from '@/mock/${mod}'`
       }).join('\n') + '\n'
@@ -106,12 +118,18 @@ console.log(`数据库：${DB_FILE === ':memory:' ? '(内存)' : DB_FILE}\n`)
 let total = 0
 for (const { key, mockName } of PLAN) {
   const resource = RESOURCES[key]
+  db.exec(`DELETE FROM "${resource.table}"`)
+
+  if (!mockName) {
+    console.log(`  – ${resource.label.padEnd(8, '　')} ${resource.table.padEnd(18)} 已清空（无种子）`)
+    continue
+  }
+
   const rows = mock[mockName]
   if (!Array.isArray(rows)) {
     throw new Error(`mock 里没有导出 ${mockName}（${key} 的种子缺失）`)
   }
 
-  db.exec(`DELETE FROM "${resource.table}"`)
   for (const row of rows) insertRow(db, resource, rowToValues(resource, row))
 
   total += rows.length

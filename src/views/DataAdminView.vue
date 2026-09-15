@@ -270,8 +270,12 @@ const HAZARD_STATUS: { value: HazardStatus; label: string }[] = [
 ]
 
 /**
- * 四张表的界面定义 —— 字段名与先后顺序照搬 `src/mock/*.ts` 里的类型定义，
+ * 五张表的界面定义 —— 字段名与先后顺序照搬 `src/mock/*.ts` 里的类型定义，
  * 与后端 `server/db.mjs` 的 `RESOURCES` 一一对应。
+ *
+ * 「决策工单」是唯一一张**没有 mock 对应物**的表（见 `OrderRow` 那段注释）：
+ * 其余四张的数据源是 `src/mock/*.ts`，它的是「在决策指挥页点采纳」这个动作。
+ * 字段顺序照搬 `server/db.mjs` 的 `'decision/orders'.fields`。
  */
 const RESOURCES: ResourceDef[] = [
   {
@@ -345,6 +349,54 @@ const RESOURCES: ResourceDef[] = [
         tip: '可覆盖状态的中文写法（如「已修复」）'
       }
     ]
+  },
+  {
+    key: 'order',
+    label: '决策工单',
+    subtitle: 'DECISION ORDERS',
+    pk: 'id',
+    autoKey: true,
+    primaryHint: '在「决策指挥」页采纳建议时自动建单',
+    formHeight: 720,
+    fields: [
+      { name: 'suggestion', label: '来源建议', type: 'text', required: true, placeholder: '生产计划优化', minWidth: 130 },
+      {
+        name: 'content',
+        label: '建议正文',
+        type: 'text',
+        required: true,
+        placeholder: '采纳那一刻的快照',
+        minWidth: 200,
+        tip: '采纳时抄下来的原文，之后建议改了工单也不跟着变'
+      },
+      {
+        name: 'level',
+        label: '紧急度',
+        type: 'text',
+        placeholder: 'high / mid / low',
+        width: 110,
+        tip: '取值必须是 high、mid、low 之一，否则后端按 mid 落库'
+      },
+      { name: 'owner', label: '责任人', type: 'text', placeholder: '李**', width: 110 },
+      {
+        name: 'status',
+        label: '状态',
+        type: 'text',
+        placeholder: 'todo / doing / done',
+        width: 130,
+        tip: '取值必须是 todo、doing、done 之一，否则后端按 todo 落库'
+      },
+      { name: 'due', label: '要求完成时间', type: 'text', placeholder: '2026-06-30', width: 140 },
+      {
+        name: 'createdAt',
+        label: '建单时间',
+        type: 'text',
+        width: 170,
+        // 只读性写进提示语：这一列后端 `fields` 里**没有**，
+        // 所以就算填了也传不进去，工单时间始终由服务端说了算
+        tip: '服务端在建单时写入，前端改不了也传不进去'
+      }
+    ]
   }
 ]
 
@@ -374,7 +426,13 @@ const pendingDelete = ref<Row | null>(null)
 const current = computed(() => RESOURCES.find((r) => r.key === active.value) as ResourceDef)
 
 function countOf(key: ResourceKey): string {
-  const table = { quality: 'quality_records', duty: 'duty_schedule', spare: 'spare_parts', hazard: 'hazard_disposals' }[key]
+  const table = {
+    quality: 'quality_records',
+    duty: 'duty_schedule',
+    spare: 'spare_parts',
+    hazard: 'hazard_disposals',
+    order: 'decision_orders'
+  }[key]
   const n = counts.value[table]
   return typeof n === 'number' ? String(n) : '—'
 }

@@ -61,10 +61,21 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '安全管理' }
   },
   {
-    path: '/production',
-    name: 'production',
-    component: () => import('@/views/ProductionView.vue'),
-    meta: { title: '生产管理' }
+    // 智能监控（看现在）：实时产量、设备运转、人员在岗、实时告警。
+    // 曾经与「统计报表」共用 `/production` —— 两个顶栏 Tab 点进去是同一份代码，
+    // 那次重复就是这么来的。四条 Tab 现在各指一条独立路由。
+    path: '/monitoring',
+    name: 'monitoring',
+    component: () => import('@/views/MonitorView.vue'),
+    meta: { title: '智能监控' }
+  },
+  {
+    // 统计报表（看过去）：日报月报、多维汇总、一键导出。
+    // 主体由原 `/production` 的「生产管理系统」搬迁而来，内容本就是历史统计。
+    path: '/reports',
+    name: 'reports',
+    component: () => import('@/views/ReportsView.vue'),
+    meta: { title: '统计报表' }
   },
   {
     path: '/equipment',
@@ -85,10 +96,21 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '数字孪生' }
   },
   {
+    // 决策指挥（看将来）：趋势预测、优化建议、采纳派单。
+    // 原「分析决策」页的四个维签已拆开——成本效益与能耗单耗归 `/cost`，
+    // 这里留生产分析与安全分析，并接上「建议 → 工单」的闭环。
     path: '/decision',
     name: 'decision',
     component: () => import('@/views/DecisionView.vue'),
-    meta: { title: '分析决策' }
+    meta: { title: '决策指挥' }
+  },
+  {
+    // 成本管理（看花钱）：吨成本拆解、峰谷平电费、单机成本、预算执行。
+    // 效果分析不在这里（那是结论，归决策指挥），本页只回答「钱花在哪」。
+    path: '/cost',
+    name: 'cost',
+    component: () => import('@/views/CostView.vue'),
+    meta: { title: '成本管理' }
   },
   {
     // 开发工具：把三维模型对齐到底图真实地物的坐标拾取页。

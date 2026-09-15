@@ -44,14 +44,17 @@ const base = process.argv.filter((a) => !a.startsWith('--'))[2] || 'http://local
 const TABS = [
   // ---- 左：智慧生产系统 ----
   ['数字孪生', '/digital-twin'],
-  ['智能监控', '/production'],
+  ['智能监控', '/monitoring'],
   ['AI视频分析', '/emergency'],
   ['安全管理', '/safety'],
   ['设备管理', '/equipment'],
   // ---- 右：智慧经营系统 ----
+  // 这四条曾经只指向两条路由（决策指挥与成本管理都写 /decision，
+  // 统计报表与左栏的智能监控都写 /production），点进去是同一个页面。
+  // 现在按「实时 / 历史 / 决策 / 成本」四分，各指一条独立路由。
   ['决策指挥', '/decision'],
-  ['成本管理', '/decision'],
-  ['统计报表', '/production']
+  ['成本管理', '/cost'],
+  ['统计报表', '/reports']
 ]
 
 /** 顶栏第二行的静态分组标题：必须在、必须不可点 */
@@ -163,9 +166,12 @@ const tabCheckStart = checks.length
 const specTabs = SELF_TEST
   ? [
       ['不存在的模块', '/nowhere'],
-      ['智能监控', '/digital-twin'] // 真实目标 /production，故意写错
+      ['智能监控', '/digital-twin'] // 真实目标 /monitoring，故意写错
     ]
   : TABS
+
+/** 每个 Tab 点完之后真的落在哪个地址上 —— 后面那条「互不相同」的判据要用 */
+const navigated = []
 
 for (const [label, expectedPath] of specTabs) {
   await home()
@@ -188,12 +194,35 @@ for (const [label, expectedPath] of specTabs) {
     moved = false
   }
   const after = await page.evaluate(() => location.hash)
+  navigated.push({ label, after })
 
   checks.push([
     moved ? `「${label}」→ ${expectedPath}` : `「${label}」→ ${expectedPath}（点了没跳到，停在 ${after}）`,
     moved
   ])
 }
+
+/**
+ * 八个 Tab 必须落到**八个互不相同**的地址上。
+ *
+ * 这一条是用户最初那句抱怨的回归判据：「智能监控和统计报表一模一样，
+ * 决策指挥和成本管理一模一样」。根因不是一个页面抄了另一个页面的图，
+ * 而是 `nav.ts` 里四条 Tab 只写了**两条** path —— 两个 Tab 点进去
+ * 物理上就是同一个组件，而且顶栏高亮判的是 `route.path === item.path`，
+ * 所以点「统计报表」时「智能监控」**会同时亮**。
+ *
+ * 上面那条逐 Tab 的断言只证明「点了会跳、跳到的地址对」；
+ * 两条 Tab 写同一个 path 时它照样全绿（两边都「跳对了」）。
+ * 所以这条判据**不能省**，它判的是「互不相同」这件事本身。
+ */
+const landed = navigated.map((n) => n.after).filter(Boolean)
+const dupes = landed.filter((p, i) => landed.indexOf(p) !== i)
+checks.push([
+  dupes.length
+    ? `有 Tab 落到了同一个路由：${[...new Set(dupes)].join('、')}（重复的 Tab 点进去是同一个页面）`
+    : `${landed.length} 个 Tab 落到 ${new Set(landed).size} 个互不相同的路由`,
+  landed.length > 0 && dupes.length === 0
+])
 
 await browser.close()
 

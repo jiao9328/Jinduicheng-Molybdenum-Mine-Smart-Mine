@@ -108,7 +108,35 @@ CREATE TABLE IF NOT EXISTS hazard_disposals (
   "status"     TEXT NOT NULL DEFAULT 'todo',
   "statusText" TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS decision_orders (
+  "id"         INTEGER PRIMARY KEY AUTOINCREMENT,
+  "suggestion" TEXT NOT NULL DEFAULT '',
+  "content"    TEXT NOT NULL DEFAULT '',
+  "level"      TEXT NOT NULL DEFAULT 'mid',
+  "owner"      TEXT NOT NULL DEFAULT '',
+  "status"     TEXT NOT NULL DEFAULT 'todo',
+  "due"        TEXT NOT NULL DEFAULT '',
+  "createdAt"  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 `
+
+// ---------------------------------------------------------------------------
+// 值域常量
+// ---------------------------------------------------------------------------
+// ⚠️ 这几个常量**必须定义在 `RESOURCES` 之前**：`RESOURCES` 的初始化表达式
+// 里直接引用了它们，而 `const` 有暂时性死区 —— 写在后面会让整个模块在
+// import 的一瞬间就抛 `Cannot access 'X' before initialization`，
+// 表现为「后端起不来但看不出是哪一行」。
+
+/** 隐患状态机。写接口只认这三个值，别的一律当参数错误 */
+export const HAZARD_STATUS = ['todo', 'doing', 'done']
+
+/** 决策工单的紧急度 */
+export const DECISION_LEVELS = ['high', 'mid', 'low']
+
+/** 决策工单状态机。与隐患共用同一套三档语义，页面的 StatusTag 也认这三个值 */
+export const ORDER_STATUS = ['todo', 'doing', 'done']
 
 /**
  * 资源定义 —— 后端路由、种子脚本、自检脚本**共用这一份**。
@@ -162,11 +190,35 @@ export const RESOURCES = {
     autoKey: true,
     fields: { type: 'text', location: 'text', status: 'text', statusText: 'text' },
     required: ['type']
+  },
+  /**
+   * 决策工单 —— 由「决策指挥」页采纳一条建议后生成，之后可流转状态。
+   *
+   * `createdAt` **刻意不在 `fields` 里**：它由建表语句的 SQL DEFAULT 填。
+   * 放进 fields 的话 `pickFields` 会老老实实把客户端传来的值写进去，
+   * 而「工单什么时候建的」不该由前端说了算 —— 客户端时钟错一点就写错，
+   * 更别说谁都能随手backdate。不进 fields ⇒ INSERT 语句里没这一列 ⇒ 走 DEFAULT。
+   */
+  'decision/orders': {
+    table: 'decision_orders',
+    label: '决策工单',
+    key: 'id',
+    autoKey: true,
+    fields: {
+      suggestion: 'text',
+      content: 'text',
+      level: 'text',
+      owner: 'text',
+      status: 'text',
+      due: 'text'
+    },
+    required: ['suggestion', 'content'],
+    enumFields: {
+      level: { values: DECISION_LEVELS, fallback: 'mid' },
+      status: { values: ORDER_STATUS, fallback: 'todo' }
+    }
   }
 }
-
-/** 隐患状态机。写接口只认这三个值，别的一律当参数错误 */
-export const HAZARD_STATUS = ['todo', 'doing', 'done']
 
 /** 打开库并确保表结构就位。目录不存在就建（首次 clone 后 server/data 不存在） */
 export function openDb(path = DB_PATH) {
@@ -221,6 +273,28 @@ export function pickFields(resource, body, { partial = false } = {}) {
     if (value === undefined || value === '' || value === null) {
       throw new FieldError(`字段 ${name} 不能为空`)
     }
+  }
+
+  /**
+   * 值域校验 —— 只对声明了 `enumFields` 的资源生效。
+   *
+   * 为什么非要有这一层：这些列的值会被页面直接喂给 `StatusTag` 之类的组件
+   * （`todo/doing/done` → 三种颜色标签）。放一个 `doingg` 进去不会报任何错，
+   * 页面照常渲染，只是那一格的标签是**空白**的 —— 又是「不报错的错」。
+   *
+   * 空值退回该列的默认档而不是直接拒绝：非 partial 的创建会把所有声明过的
+   * 字段都集合一遍，客户端没传的列这时就是空串，一律拒绝的话
+   * 「只填建议正文就建单」会失败，而那正是页面最常用的调用方式。
+   */
+  for (const [name, rule] of Object.entries(resource.enumFields ?? {})) {
+    if (partial && !Object.prototype.hasOwnProperty.call(out, name)) continue
+
+    const raw = out[name]
+    const value = raw ? raw : rule.fallback
+    if (!rule.values.includes(value)) {
+      throw new FieldError(`字段 ${name} 只能是 ${rule.values.join(' / ')}，收到「${raw}」`)
+    }
+    out[name] = value
   }
 
   if (partial && Object.keys(out).length === 0) {

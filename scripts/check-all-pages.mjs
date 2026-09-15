@@ -10,7 +10,7 @@ const base = process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'htt
 const outDir = '.snapshots/pages'
 
 /**
- * 全站路由清单 —— **8 条**，与 `src/router/index.ts` 里的业务路由一一对应。
+ * 全站路由清单 —— **10 条**，与 `src/router/index.ts` 里的业务路由一一对应。
  *
  * 原来还有 5 条 `/module/*` 占位页（顶栏「规划中」Tab 的落点），
  * 随那些 Tab 一起删除了：本平台的路由现在**条条都有真实页面**，
@@ -21,6 +21,12 @@ const outDir = '.snapshots/pages'
  * 而它又最容易悄悄坏掉（表格没渲染、接口全 403），正是该被巡检盯住的类型。
  * 巡检用 admin 账号登录（见 `lib/session.mjs`），所以进得去。
  *
+ * 2026-09-15：`/production` 退役，拆成 `/monitoring`（智能监控）与
+ * `/reports`（统计报表）；`/decision` 一分为二，`/cost`（成本管理）独立出来。
+ * 原来是「四条 Tab 只指向两条路由」，两个 Tab 点进去是同一个页面。
+ * **新页面必须进这张表**，不进就没人巡检它们 —— 而拆分本身
+ * 恰恰是最容易让某一页悄悄坏掉的动作。
+ *
  * 两条**不在表内**：
  * - `/coord-picker` 是开发工具（把三维模型对齐到底图真实地物），不是业务页面；
  * - `/login` 是登录页本身。巡检已带会话，打开它会被守卫弹回 `/`，
@@ -29,11 +35,13 @@ const outDir = '.snapshots/pages'
 const PAGES = [
   ['/', '综合管控平台'],
   ['/safety', '安全管理'],
-  ['/production', '生产管理'],
+  ['/monitoring', '智能监控'],
+  ['/reports', '统计报表'],
   ['/equipment', '设备管理'],
   ['/emergency', '应急救援'],
   ['/digital-twin', '数字孪生'],
-  ['/decision', '分析决策'],
+  ['/decision', '决策指挥'],
+  ['/cost', '成本管理'],
   ['/data-admin', '数据管理']
 ]
 
@@ -98,34 +106,34 @@ const 健康行 = (页面) => ({
   渲染失败: null,
   截图失败: null
 })
-const 七页 = () => PAGES.map(([, name]) => 健康行(name))
+const 全页 = () => PAGES.map(([, name]) => 健康行(name))
 
 export const 自证样本 = [
-  { name: '正例·7 页全健康', 行: 七页(), 应报: 0 },
+  { name: '正例·全部页面全健康', 行: 全页(), 应报: 0 },
   {
     // 这条是口径本身：后端没起时接口 404 是预期行为，不许把它算成失败
     name: '反例·某页 99 条接口未就绪（后端没起，预期降级）',
-    行: 七页().map((r) => (r.页面 === '安全管理' ? { ...r, 接口未就绪: 99 } : r)),
+    行: 全页().map((r) => (r.页面 === '安全管理' ? { ...r, 接口未就绪: 99 } : r)),
     应报: 0
   },
-  { name: '正例·某页 1 条真错误', 行: 七页().map((r) => (r.页面 === '生产管理' ? { ...r, 错误: 1 } : r)), 应报: 1 },
+  { name: '正例·某页 1 条真错误', 行: 全页().map((r) => (r.页面 === '智能监控' ? { ...r, 错误: 1 } : r)), 应报: 1 },
   {
     name: '正例·渲染失败（停渲染循环时抛错）',
-    行: 七页().map((r) => (r.页面 === '数字孪生' ? { ...r, 渲染失败: 'Cannot read properties of undefined' } : r)),
+    行: 全页().map((r) => (r.页面 === '数字孪生' ? { ...r, 渲染失败: 'Cannot read properties of undefined' } : r)),
     应报: 1
   },
   {
     name: '正例·截图失败（超时）',
-    行: 七页().map((r) => (r.页面 === '综合管控平台' ? { ...r, 截图失败: 'Timeout 120000ms exceeded' } : r)),
+    行: 全页().map((r) => (r.页面 === '综合管控平台' ? { ...r, 截图失败: 'Timeout 120000ms exceeded' } : r)),
     应报: 1
   },
   {
     name: '正例·三维报错面板（Cesium 自己报了错）',
-    行: 七页().map((r) => (r.页面 === '应急救援' ? { ...r, 三维报错面板: 'An error occurred while rendering.' } : r)),
+    行: 全页().map((r) => (r.页面 === '应急救援' ? { ...r, 三维报错面板: 'An error occurred while rendering.' } : r)),
     应报: 1
   },
   { name: '正例·一行结论都没有（巡检空转，最容易冒充绿）', 行: [], 应报: 1 },
-  { name: '正例·只跑了 6 页（少一页）', 行: 七页().slice(0, 6), 应报: 1 },
+  { name: '正例·少跑一页', 行: 全页().slice(0, -1), 应报: 1 },
   { name: '正例·结论不是数组（读挂了）', 行: null, 应报: 1 }
 ]
 

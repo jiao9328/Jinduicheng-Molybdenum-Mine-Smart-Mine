@@ -47,11 +47,18 @@
  *   1. 首页在「产量统计」的图表容器上写死一个高度，断言三条判据确实报警；
  *   2. **切到数字孪生页的非默认页签**再做一遍，并且先断言默认态的面板已经消失
  *      （若没消失，说明页签压根没切，后面量到的还是默认态 —— 那这条遍历就是空转）；
- *   3. 分析决策页切到**离默认态最远**的「能耗单耗」再做一遍，并额外断言
- *      ① 面板容器仍在 84px 顶栏下方、正好 996px 高（顶栏插槽没吃掉内容高度的结构性前提）；
- *      ② 成本效益维的 8 块面板与硬编码规格一致；
- *      ③ 该维每块面板的 body 高 > 0 —— 面板被「隐藏」而非「卸载」时三条判据会全部
- *         平凡为真，报告里会出现一排 body 0×0 的绿灯行。
+ *   3. 三个单屏大屏页（`/monitoring` `/decision` `/cost`）各做一遍：干净状态不误报、
+ *      面板容器仍在 84px 顶栏下方且正好 996px 高（顶栏插槽没吃掉内容高度的结构性前提）、
+ *      每块面板 body 高 > 0（面板被「隐藏」而非「渲染」时三条判据会全部平凡为真，
+ *      报告里会出现一排 body 0×0 的绿灯行），最后注入缺陷要求报警。
+ *
+ * ⚠️ **`--self-test` 只跑上面三段，不跑常规体检** —— 那是两条分开的路径
+ * （自证段以 `process.exit` 结束，文件末尾的 PAGES 循环在自证模式下不会执行）。
+ * 要巡检真实页面，用不带参数的 `node scripts/check-panel-overflow.mjs`。
+ *
+ * 上一版第 3 段写的是「分析决策页的四维切换」，而那一页改版后已经没有四维页签，
+ * `TAB_PAGES[1]` 是 `undefined`，于是自证模式**一进第 3 段就 TypeError 退出**，
+ * 外面看起来只是「跑完了，没输出报告」。这一段已按新版式重写。
  * 不加这个参数时行为不变。
  *
  * ⚠️ 注入的高度**由实测的 body 高度算出来**（×2），不写死像素值。
@@ -61,13 +68,32 @@
  */
 import { chromium } from 'playwright'
 import { login, newLoggedInPage } from './lib/session.mjs'
+// ⚠️ 点 DOM 一律走 `clickAt`，**不要用 `locator.click()`** —— 理由见该文件头
+import { clickAt } from './lib/click.mjs'
 
 const argv = process.argv.slice(2)
 const selfTest = argv.includes('--self-test')
 const base = argv.find((a) => !a.startsWith('--')) || 'http://localhost:8787'
 
-/** 有面板的页面。坐标拾取工具页与占位页没有面板，不在此列 */
-const PAGES = ['/', '/safety', '/production', '/equipment', '/emergency', '/decision']
+/**
+ * 有面板的页面。坐标拾取工具页与占位页没有面板，不在此列。
+ *
+ * `/monitoring` `/reports` `/cost` 是 2026-09-15 从「两个巨页」拆出来的：
+ * 原来「智能监控」与「统计报表」共用 `/production`、「决策指挥」与「成本管理」
+ * 共用 `/decision`，两个 Tab 点进去是同一个页面。拆成四条独立路由之后，
+ * **新页面必须进这张表** —— 不进就没人巡检它们的面板会不会撑破或互相压住，
+ * 而大屏形态（面板浮在三维上）恰恰是最容易压住彼此的版式。
+ */
+const PAGES = [
+  '/',
+  '/safety',
+  '/monitoring',
+  '/reports',
+  '/equipment',
+  '/emergency',
+  '/decision',
+  '/cost'
+]
 
 /**
  * 靠页签切换面板的页面。
@@ -90,37 +116,21 @@ const TAB_PAGES = [
       ['边坡位移监测与动态模拟']
     ],
     layerGroups: ['twin-device-', 'twin-risk-', 'slope-']
-  },
-  {
-    path: '/decision',
-    tabSelector: '.decision__dim',
-    tabs: ['成本效益', '生产分析', '安全分析', '能耗单耗'],
-    expect: [
-      // 成本效益维是本页改造前的原样 —— 这 8 个标题就是「一字不动」的守门人
-      [
-        '年度成本对比',
-        '前 5 大支出项',
-        '各类型成本分布',
-        '维护成本月度趋势',
-        '用水用电成本月度趋势',
-        '人力成本月度趋势',
-        '效益分析',
-        '智能辅助决策建议'
-      ],
-      // §9.2-1
-      ['产量趋势（计划 vs 实际）', '设备利用率', '工序效率', '损失贫化率趋势'],
-      // §9.2-2
-      [
-        '隐患类型分布',
-        '事故率趋势',
-        '「三违」行为统计（按类别）',
-        '「三违」行为统计（按区队）'
-      ],
-      // §9.2-3
-      ['峰谷平电费', '能耗构成', '水消耗', '单耗趋势', '吨成本拆解', '单机成本']
-    ]
   }
 ]
+
+// ⚠️ `/decision` 从这里**整条移除**了，不是漏掉：那一页已经改成单屏大屏形态，
+// 四维页签（`.decision__dim`）连同「一次只显示一维」的行为一起没了，
+// 所以「页签 ↔ 面板 ↔ 图层」这三段对它**不适用** —— 不是「通过」，是不适用。
+// 它现在按普通页面走上面的 `PAGES`，只受「面板不撑破、不互相压住」那条体检管，
+// 而它自己的数字对不对由 `check-decision.mjs` 负责。
+//
+// 顺带记一笔：上一版这一条写的是四维页签下各维应当出现的面板标题
+// （成本效益 8 块、生产分析 4 块、安全分析 4 块、能耗单耗 6 块）。
+// 那些标题现在**分别住在两个页面上** —— 成本类搬进了 `/cost`，
+// 分析类留在 `/decision` —— 已经没有任何一条「按页签切过去再数面板」的
+// 判据能覆盖它们。这是拆分路由付的代价，如实记在这里，
+// 不假装判据的强度跟拆分之前一样。
 
 // ---------- 规格自身的静态自检（不开浏览器） ----------
 // 期望标题若写成同一个字符串，判据 C 就退化成「页面里有一块面板」，而这个退化**不报错**。
@@ -336,7 +346,20 @@ async function runTabPage(spec) {
   for (const [i, label] of spec.tabs.entries()) {
     if (i > 0) {
       try {
-        await page.locator(spec.tabSelector).nth(i).click({ timeout: 10000 })
+        /**
+         * ⚠️ 用 `clickAt`，不用 `locator.click()`。
+         *
+         * 这一条实测撞过：`locator.click: Timeout 10000ms exceeded.
+         * - waiting for locator('.twin__tab').nth(1) - locator resolved to
+         * <button class="twin__tab">风险分布</button> - attempting click action
+         * - waiting for element to be visible, enabled and stable` ——
+         * 元素找到了、也没被挡住，就是卡在 Playwright 的可操作性检查上。
+         * 成因与实测范围见 `lib/click.mjs` 文件头。
+         */
+        const tab = await clickAt(page, spec.tabSelector, { index: i, timeout: 10000 })
+        // 转成抛出，让下面的 catch 照旧接住 —— 那段的分工（切不过去 vs 等不到）
+        // 是两次误诊换来的，不能因为换了点击方式就绕过它。
+        if (!tab.ok) throw new Error(tab.reason)
         // 等**全部**期望面板标题都出现。用固定 sleep 的话，「点了没反应」也会被放过去；
         // 只等第一块则会在「切了一半」时误判成功。
         await page.waitForFunction(
@@ -349,12 +372,15 @@ async function runTabPage(spec) {
           spec.expect[i],
           { timeout: 20000, ...POLL }
         )
-      } catch {
-        console.log(`  ✗ 页签「${label}」点了没反应：等不到面板「${spec.expect[i]}」出现`)
+      } catch (err) {
+        // 把「点不动」和「点了但面板没出来」分开说 —— 这两件事的排查方向完全不同，
+        // 上一版一律写成「点了没反应」，正好是这一轮反复吃亏的那种含糊。
+        const why = String(err?.message || err).replace(/\s+/g, ' ').slice(0, 120)
+        console.log(`  ✗ 页签「${label}」切不过去：${why}`)
         rows.push({
           path: `${spec.path} [${label}]`,
           title: '(切换失败)',
-          issues: ['等不到期望面板出现 —— 这一态从没被量过']
+          issues: [`切不过去：${why} —— 这一态从没被量过`]
         })
         titleSets.push([])
         continue
@@ -522,7 +548,9 @@ if (selfTest) {
 
   // 先切到第 2 个页签（非默认态）
   const tClick = Date.now()
-  await page.locator(spec.tabSelector).nth(1).click({ timeout: 10000 })
+  // 同上：`clickAt` 而非 `locator.click()`（这一条正是被它炸掉整轮的那一处）
+  const t1 = await clickAt(page, spec.tabSelector, { index: 1, timeout: 10000 })
+  if (!t1.ok) throw new Error(`页签点不动：${t1.reason}`)
   try {
     // ⚠️ `spec.expect[i]` 是**标题数组**，不是单个标题：必须 `every` 逐一比。
     // 这里曾经写成 `some((el) => el.textContent.trim() === t)` 而把整个数组当 t，
@@ -581,71 +609,68 @@ if (selfTest) {
   console.log(`\n【页签注入】「${spec.tabs[1]}」的图表容器写死 ${tabInject}px（body 的 2 倍）`)
   console.log(`  判据命中：${tabDirtyIssues.length ? tabDirtyIssues.join('；') : '无（期望报警）'}`)
 
-  // ---- 第三段：分析决策页的四维切换 ----
-  // 这一段要证三件事：成本效益维与硬编码规格一致；切到别的维后它真的从 DOM 消失；
-  // 在非默认维注入缺陷会红（否则「只量了默认维」也会全绿）。
-  const dspec = TAB_PAGES[1]
-  await settle(dspec.path)
+  // ---- 第三段：三个单屏大屏页（/monitoring、/decision、/cost） ----
+  //
+  // 这一段原来是「分析决策页的四维切换」：切到「能耗单耗」维再量一遍，
+  // 外加「成本效益维的 8 块面板与硬编码规格一致」。
+  // 那一页 2026-09-15 改成了单屏大屏，四维页签（`.decision__dim`）整块没了，
+  // 所以那段代码是在读一个**已经不存在**的 `TAB_PAGES[1]`
+  // （`TypeError: Cannot read properties of undefined (reading 'path')`，
+  // 把整轮巡检当场炸掉、一份报告都不产出）。
+  //
+  // ⚠️ 判据是**搬过来**，不是删掉 —— 与 `check-cost.mjs` 对成本判据的处理同一个原则。
+  // 搬的是这三件事：① 干净状态不误报；② 面板容器没被顶栏吃掉（大屏版式的结构性前提）；
+  // ③ 在它身上注入缺陷会红。少了 ③，一条检查「从没见过它变红」，按《补充件 3》§1.3 不算证据。
+  //
+  // 搬**不走**的是原来那两条「按页签切过去再数面板」的判据（成本效益 8 块 / 能耗单耗 6 块），
+  // 因为新版式没有页签了；那两张面板标题表现在住在 `check-decision.mjs` 与
+  // `check-cost.mjs` 的 `SPEC_PANELS` 里。这个损失已在文件上方 TAB_PAGES 的注里记账。
+  const DASH_PAGES = [
+    { path: '/monitoring', main: '.monitor__main' },
+    { path: '/decision', main: '.decision__main' },
+    { path: '/cost', main: '.cost__main' }
+  ]
+  const dash = []
+  for (const d of DASH_PAGES) {
+    await settle(d.path)
 
-  // 顶栏插槽有没有吃掉内容高度 —— 这是「成本效益维的面板矩形与本页改造前一致」的
-  // 结构性前提：面板容器必须仍从 84px（顶栏高）开始，且正好 996px 高。
-  const geom = await page.evaluate(() => {
-    const r = document.querySelector('.decision__main')?.getBoundingClientRect()
-    return r ? { top: Math.round(r.top), height: Math.round(r.height) } : null
-  })
-  const geomOk = !!geom && geom.top === 84 && geom.height === 996
+    // 顶栏插槽有没有吃掉内容高度 —— 面板容器必须从 84px（顶栏高）开始、正好 996px 高。
+    const geom = await page.evaluate((sel) => {
+      const r = document.querySelector(sel)?.getBoundingClientRect()
+      return r ? { top: Math.round(r.top), height: Math.round(r.height) } : null
+    }, d.main)
 
-  const costPanels = await measurePanels(page)
-  const costTitles = costPanels.map((p) => p.title)
-  const costSpecOk =
-    [...costTitles].sort().join('|') === [...dspec.expect[0]].sort().join('|')
-  console.log(
-    `\n【四维自证】成本效益维面板容器 top ${geom?.top} 高 ${geom?.height}（期望 84 / 996）` +
-      `　面板 ${costTitles.length} 块，与硬编码规格一致：${costSpecOk ? '是' : '否'}`
-  )
+    const panels = await measurePanels(page)
+    const clean = panels.flatMap(issuesOf)
+    // 每一块都真占了面积 —— 有 body 高 0 的面板，说明它是被隐藏而不是被渲染，
+    // 那种面板的三条判据会全部平凡为真（独立于标题比对的、更硬的一条）
+    const minBody = Math.min(...panels.map((p) => p.bodyHeight ?? 0))
+    console.log(`\n【单屏大屏】${d.path} 面板容器 top ${geom?.top} 高 ${geom?.height}（期望 84 / 996）`)
+    console.log(`  面板 ${panels.length} 块，最小 body 高 ${minBody}px（> 0 才说明面板真的渲染出来了）`)
+    console.log(`  判据命中：${clean.length ? clean.join('；') : '无（期望无）'}`)
 
-  // 切到最后一个维度（离默认态最远）
-  const k = dspec.tabs.length - 1
-  await page.locator(dspec.tabSelector).nth(k).click({ timeout: 10000 })
-  await page.waitForFunction(
-    (want) =>
-      want.every((t) =>
-        [...document.querySelectorAll('.panel-box__title')].some(
-          (el) => el.textContent.trim() === t
-        )
-      ),
-    dspec.expect[k],
-    { timeout: 20000, ...POLL }
-  )
+    const inject = Math.round((panels[0]?.bodyHeight ?? 300) * 2)
+    await page.evaluate(
+      ({ h }) => {
+        const el = document.querySelector('.panel-box .echart-box')
+        if (el) el.style.height = `${h}px`
+      },
+      { h: inject }
+    )
+    await page.waitForTimeout(1500)
 
-  const dimPanels = await measurePanels(page)
-  const dimTitles = dimPanels.map((p) => p.title)
-  // 默认维的面板必须已经不在 DOM 里。还在 ⇒ 用的是 v-show，隐藏面板量出来是全 0，
-  // 三条判据会全部平凡为真，报告里出现一排 body 0×0 的绿灯行。
-  const costGone = !dimTitles.some((t) => dspec.expect[0].includes(t))
-  const dimCleanIssues = dimPanels.flatMap(issuesOf)
-  // 每一块都真占了面积 —— 有 body 高 0 的面板，说明它是被隐藏而不是被卸载，
-  // 那种面板的三条判据会全部平凡为真（这是一条独立的、比标题比对更硬的判据）
-  const minBody = Math.min(...dimPanels.map((p) => p.bodyHeight ?? 0))
-  const allSized = dimPanels.length > 0 && minBody > 0
-  console.log(`\n【四维自证】切到「${dspec.tabs[k]}」后 DOM 里面板：${JSON.stringify(dimTitles)}`)
-  console.log(`  成本效益维的面板已消失：${costGone ? '是（期望是）' : '否（期望是）'}`)
-  console.log(`  最小 body 高 ${minBody}px（> 0 才说明面板真的渲染出来了，不是被隐藏）`)
-  console.log(`  判据命中：${dimCleanIssues.length ? dimCleanIssues.join('；') : '无（期望无）'}`)
+    const dirty = (await measurePanels(page)).flatMap(issuesOf)
+    console.log(`\n【单屏注入】${d.path} 的图表容器写死 ${inject}px（body 的 2 倍）`)
+    console.log(`  判据命中：${dirty.length ? dirty.join('；') : '无（期望报警）'}`)
 
-  const dimInject = Math.round((dimPanels[0]?.bodyHeight ?? 300) * 2)
-  await page.evaluate(
-    ({ h }) => {
-      const el = document.querySelector('.panel-box .echart-box')
-      if (el) el.style.height = `${h}px`
-    },
-    { h: dimInject }
-  )
-  await page.waitForTimeout(1500)
-
-  const dimDirtyIssues = (await measurePanels(page)).flatMap(issuesOf)
-  console.log(`\n【四维注入】「${dspec.tabs[k]}」的图表容器写死 ${dimInject}px（body 的 2 倍）`)
-  console.log(`  判据命中：${dimDirtyIssues.length ? dimDirtyIssues.join('；') : '无（期望报警）'}`)
+    dash.push({
+      path: d.path,
+      geomOk: !!geom && geom.top === 84 && geom.height === 996,
+      allSized: panels.length > 0 && minBody > 0,
+      clean: clean.length,
+      dirty: dirty.length
+    })
+  }
 
   await browser.close()
 
@@ -656,12 +681,14 @@ if (selfTest) {
     ['页签确实切换了（默认态面板已消失）', defaultGone],
     ['非默认页签干净状态不误报', tabCleanIssues.length === 0],
     ['非默认页签注入缺陷后确实报警 —— 遍历不是空转', tabDirtyIssues.length > 0],
-    ['分析决策页顶栏插槽没吃掉内容高度（top 84 / 高 996）', geomOk],
-    ['成本效益维的 8 块面板与硬编码规格一致（「一字不动」的守门人）', costSpecOk],
-    ['四维切换卸载了默认维（不是 v-show 隐藏）', costGone],
-    ['非默认维度的每块面板都真占了面积（body 高 > 0）', allSized],
-    ['非默认维度干净状态不误报', dimCleanIssues.length === 0],
-    ['非默认维度注入缺陷后确实报警', dimDirtyIssues.length > 0]
+    // 三个单屏大屏页各四条 —— 判据从「四维切换」搬到「单屏」，
+    // 见上面第三段开头的说明。页面增删时这里跟着 DASH_PAGES 一起变。
+    ...dash.flatMap((d) => [
+      [`${d.path} 面板容器在顶栏下方且占满内容高（top 84 / 高 996）`, d.geomOk],
+      [`${d.path} 每块面板都真占了面积（body 高 > 0，不是被隐藏）`, d.allSized],
+      [`${d.path} 干净状态不误报`, d.clean === 0],
+      [`${d.path} 注入缺陷后确实报警 —— 这一页不是没量到`, d.dirty > 0]
+    ])
   ]
   for (const [name, ok] of checks) console.log(`${ok ? '✓' : '✗'} ${name}`)
   console.log('='.repeat(64))

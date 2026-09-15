@@ -1,7 +1,7 @@
 import { http } from './http'
 
 /**
- * 四张台账的写接口 —— 数据管理页专用。
+ * 五张台账的写接口 —— 数据管理页专用。
  *
  * ## 写接口一律**不降级**
  *
@@ -15,17 +15,21 @@ import { http } from './http'
  *
  * ## 路径与查询接口完全一致
  *
- * `RESOURCE_PATHS` 里的四个路径和 `api/production|equipment|emergency` 里
+ * `RESOURCE_PATHS` 里的路径和 `api/production|equipment|emergency|decision` 里
  * 读接口用的**是同一个**。后端 `server/routes.mjs` 由同一份资源定义生成
  * 读与写的路由，所以这里不可能与那边错开。
  */
-export type ResourceKey = 'quality' | 'duty' | 'spare' | 'hazard'
+export type ResourceKey = 'quality' | 'duty' | 'spare' | 'hazard' | 'order'
 
 export const RESOURCE_PATHS: Record<ResourceKey, string> = {
   quality: '/production/quality-records',
   duty: '/production/duty-schedule',
   spare: '/equipment/spare-parts',
-  hazard: '/emergency/hazard-disposals'
+  hazard: '/emergency/hazard-disposals',
+  // 决策工单是**唯一一张没有 mock 数据的表** —— 它是「采纳建议」这个动作
+  // 在库里生成的真记录，页面上绝不凭空显示一条不存在的工单。
+  // 所以这一条能进管理页恰恰是因为它**只**存在库里，不存在降级的问题。
+  order: '/decision/orders'
 }
 
 /**
