@@ -14,7 +14,7 @@
     "typecheck": "vue-tsc --build",
     "postinstall": "node scripts/copy-cesium-assets.mjs",
     "cesium:assets": "node scripts/copy-cesium-assets.mjs",
-    "serve": "node server/index.mjs",
+    "serve": "node scripts/serve.mjs",
     "db:seed": "node scripts/seed-db.mjs"
   },
   "dependencies": {

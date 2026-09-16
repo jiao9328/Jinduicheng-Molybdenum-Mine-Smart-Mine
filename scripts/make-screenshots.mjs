@@ -39,7 +39,7 @@
  * 所以那一张用一个不带会话的新页面单独截。
  *
  * 用法：node scripts/make-screenshots.mjs [baseUrl]
- *      默认 baseUrl = http://localhost:8787（`npm run build` + `npm run serve`）
+ *      默认 baseUrl = http://localhost:8787（先 `npm run serve`，它按需自动构建）
  */
 import { chromium } from 'playwright'
 import { mkdirSync, readFileSync } from 'node:fs'

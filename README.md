@@ -119,10 +119,17 @@ npm run build        # 类型检查 + 生产构建，产物在 dist/
 npm run preview      # 本地预览构建产物（**纯静态，没有 /api，登录会失败**）
 npm run typecheck    # 仅做类型检查
 
-# 后端（四张台账 + 登录）。用内置 node:sqlite，不装任何包 —— 要求 Node ≥ 24
-npm run db:seed      # 建库并把 src/mock/*.ts 的种子灌进四张表（幂等）
+# ★ 一键启动（四张台账 + 登录 + 静态页）。用内置 node:sqlite，不装任何包 —— 要求 Node ≥ 24
+npm run db:seed      # 建库并把 src/mock/*.ts 的种子灌进四张表（幂等）；只想登录看看可跳过
 npm run serve        # http://localhost:8787，同时托管 dist/ 与 /api
 ```
+
+> **`npm run serve` 会自己判断要不要构建**：`dist/` 不存在、或比 `src/` `public/`
+> `index.html` `vite.config.ts` `/ .env` 旧时，先跑一次 `vite build` 再起服务；
+> 都不是则**跳过构建**，所以日常重复启动是秒开的。
+> 这一步刻意**只打包、不做类型检查**（`vue-tsc` 全量跑一遍慢，且类型错就不让启动
+> 对「先看看效果」太重），类型门禁仍由 `npm run build` 负责。
+> 命令行参数原样透传给后端：`npm run serve -- --port 9000`。
 
 > **Node 版本**：后端**只在 Node 24.12 上实测过**（`package.json` 的 `engines` 写的是 ≥ 24）。
 > `node:sqlite` 自 Node 22.5 起就是内置模块，但 22/23 上它还处于实验期、
@@ -131,7 +138,8 @@ npm run serve        # http://localhost:8787，同时托管 dist/ 与 /api
 > `node -e "require('node:sqlite')"` 通不通。
 > 在 24 上启动时仍会打印一行 `ExperimentalWarning`，看着吓人但无害。
 
-> **要完整跑起来（含登录）就 `npm run build && npm run db:seed && npm run serve`。**
+> **要完整跑起来（含登录）就 `npm run db:seed && npm run serve`** ——
+> 构建已由 `serve` 按需代劳，不必再手动 `npm run build`。
 > 只起 `npm run preview` 只能看到界面骨架：登录要打 `/api/auth/login`，
 > 纯静态服务没有它，于是会被守卫一直挡在登录页。
 > 只想看界面、不想起后端的话，用 `npm run dev` 配合已在跑的 `npm run serve`。

@@ -58,7 +58,7 @@
  * 5. 底图本身的精度：地形高程取自同一个 manifest，DEM 错了它跟着错。
  *
  * 用法：node scripts/check-ground-cover.mjs [baseUrl] [--self-test]
- *      默认 baseUrl = http://localhost:8787（先 `npm run build` + `npm run serve`）
+ *      默认 baseUrl = http://localhost:8787（先 `npm run serve`，它按需自动构建）
  */
 import { chromium } from 'playwright'
 import { login, newLoggedInPage } from './lib/session.mjs'
