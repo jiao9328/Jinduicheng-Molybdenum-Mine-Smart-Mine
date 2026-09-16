@@ -1,4 +1,6 @@
-# ⛏️ 智慧矿山综合管控平台
+# ⛏️ 金堆城钼矿 · 智慧矿山综合管控平台
+
+> **陕西 · 渭南 · 华州区** —— 亚洲最大钼矿，露天开采。三维底座即按该矿实测 DEM 与卫星影像判读重建。
 
 ![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D?style=flat-square&logo=vue.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white)
