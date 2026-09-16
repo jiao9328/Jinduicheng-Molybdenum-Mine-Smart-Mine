@@ -655,7 +655,7 @@ node scripts/verify-alignment.mjs           # 把模型坐标投影回屏幕，�
 `Cesium3DTileset` 的 `transform` 对齐，锚点**必须实测**（RTK 打控制点），
 不能沿用示意场景的坐标。接入方法见 `src/scene/tileset.ts`。
 
-> 参考经验：同类 WebGIS 项目（淄博智慧交通）之所以"摆得准"，是因为它的三维
+> 参考经验：同类 WebGIS 项目（[淄博智慧交通](https://github.com/jiao9328/Zibo-Smart-Traffic)）之所以"摆得准"，是因为它的三维
 > 是从**本身就带 WGS84 经纬度的矢量数据**（GeoJSON + Elevation 字段）程序化拉伸出来的，
 > 全链路只有一套坐标系。核心纪律是：**坐标系单一化、锚点实测确认、位置存数据不写死**。
 
@@ -2457,4 +2457,4 @@ README 与脚本注释里都如实标了这一点。
 - `.env` 含 Cesium Ion 令牌，未入库；需要时按 `.env.example` 自建。
 
 截图由 `node scripts/make-screenshots.mjs` 生成，界面改动后重跑即可更新。
-问题与建议欢迎在 [Issues](https://github.com/jiao9328/Integrated-Management-Platform-for-Smart-Mines/issues) 提出。
+问题与建议欢迎在 [Issues](https://github.com/jiao9328/Jinduicheng-Molybdenum-Mine-Smart-Mine/issues) 提出。
