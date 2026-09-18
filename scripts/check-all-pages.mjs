@@ -92,6 +92,45 @@ export function 判(rows, 期望页数) {
   return 违规
 }
 
+/**
+ * 已知「在这个环境里连不上」的外网主机。
+ *
+ * `tile.googleapis.com` 是 Cesium Ion 那个实景三维资产真正托管数据的地方
+ * （Ion 的 endpoint 只返回一个指向它的 URL）。国内网络**连 TCP 都建不起来**，
+ * Chromium 一直重试到约 **87 秒**才放弃。它是「默认打开在线实景三维」这个
+ * **知情决定**（第十三节第 37 条）的必然产物，不是任何页面的缺陷。
+ *
+ * ⚠️ 别把它当「网络错误一律不算」。这条豁免是**要证据的**（见 `分类消息`）：
+ * 本页必须真的有一条发往该主机的 `requestfailed`，否则规则完全不生效。
+ */
+export const 已知不可达外网 = 'tile.googleapis.com'
+
+/**
+ * 控制台错误分类 → 三个数组。纯函数，`--self-test` 直接喂合成样本。
+ *
+ * - **接口未就绪**：后端没起时接口 404 是预期行为，请求层会自动降级到内置数据。
+ * - **外网不可达**：那条到 `已知不可达外网` 的连接超时。**证据门控** ——
+ *   必须 `失败主机` 里真有那台主机才豁免；只匹配错误文本会把「页面自己的请求
+ *   超时」也一起吞掉，那正是这条检查该抓的东西。
+ * - **真错误**：剩下的。
+ *
+ * 分类放到最后做（而不是在 `console` 监听里当场分），是因为 `requestfailed`
+ * 与 `console` 是两个独立的 CDP 事件、到达顺序没有保证：当场分会因为
+ * 「主机还没记上」而把这条误判成真错误 —— 那就成了抛硬币。
+ */
+export function 分类消息(原文, 失败主机) {
+  const 真错误 = []
+  const 接口未就绪 = []
+  const 外网不可达 = []
+  for (const text of 原文) {
+    if (text.includes('404') || text.includes('/api/')) 接口未就绪.push(text)
+    else if (text.includes('net::ERR_CONNECTION_TIMED_OUT') && 失败主机.has(已知不可达外网))
+      外网不可达.push(text)
+    else 真错误.push(text)
+  }
+  return { 真错误, 接口未就绪, 外网不可达 }
+}
+
 /** 合成一行健康结论 —— 字段与下面 `summary.push` 的形状逐字对应 */
 const 健康行 = (页面) => ({
   页面,
@@ -102,6 +141,7 @@ const 健康行 = (页面) => ({
   滚动条: '无',
   错误: 0,
   接口未就绪: 3,
+  外网不可达: 0,
   三维报错面板: null,
   渲染失败: null,
   截图失败: null
@@ -132,14 +172,78 @@ export const 自证样本 = [
     行: 全页().map((r) => (r.页面 === '应急救援' ? { ...r, 三维报错面板: 'An error occurred while rendering.' } : r)),
     应报: 1
   },
+  {
+    // 与上面那条同源：已知连不上的外网主机，是第 37 条那个知情决定的产物。
+    // **报了但不判** —— 数字仍在行里（`外网不可达` 列），只是不算失败。
+    name: '反例·某页 9 条外网不可达（已确认连不上的那台主机，预期）',
+    行: 全页().map((r) => (r.页面 === '数字孪生' ? { ...r, 外网不可达: 9 } : r)),
+    应报: 0
+  },
   { name: '正例·一行结论都没有（巡检空转，最容易冒充绿）', 行: [], 应报: 1 },
   { name: '正例·少跑一页', 行: 全页().slice(0, -1), 应报: 1 },
   { name: '正例·结论不是数组（读挂了）', 行: null, 应报: 1 }
 ]
 
+/**
+ * 分类器的自证样本。**带 ★ 的两条是这组存在的理由** ——
+ * 它们证明「外网不可达」这条豁免是**收窄的**，而不是「网络错误一律不算」：
+ * 少了失败记录就不豁免，豁免了也不吞同页的其它错误。
+ */
+export const 分类样本 = [
+  {
+    name: '分类 正例·404 进接口未就绪',
+    原文: ['Failed to load resource: the server responded with a status of 404 (Not Found)'],
+    主机: [],
+    应: { 真错误: 0, 接口未就绪: 1, 外网不可达: 0 }
+  },
+  {
+    name: '分类 反例·有该主机的失败记录 → 外网不可达（不判）',
+    原文: ['Failed to load resource: net::ERR_CONNECTION_TIMED_OUT'],
+    主机: ['tile.googleapis.com'],
+    应: { 真错误: 0, 接口未就绪: 0, 外网不可达: 1 }
+  },
+  {
+    name: '分类 反例·★没有失败记录时，同样的文本不许豁免',
+    原文: ['Failed to load resource: net::ERR_CONNECTION_TIMED_OUT'],
+    主机: [],
+    应: { 真错误: 1, 接口未就绪: 0, 外网不可达: 0 }
+  },
+  {
+    name: '分类 反例·★豁免只吃那一条，同页其它真错误照报',
+    原文: [
+      'Failed to load resource: net::ERR_CONNECTION_TIMED_OUT',
+      "TypeError: Cannot read properties of undefined (reading 'x')"
+    ],
+    主机: ['tile.googleapis.com'],
+    应: { 真错误: 1, 接口未就绪: 0, 外网不可达: 1 }
+  },
+  {
+    name: '分类 反例·主机对但错误文本不对（连接被重置）不许豁免',
+    原文: ['Failed to load resource: net::ERR_CONNECTION_RESET'],
+    主机: ['tile.googleapis.com'],
+    应: { 真错误: 1, 接口未就绪: 0, 外网不可达: 0 }
+  },
+  {
+    name: '分类 正例·后端没起时一批 404 全进接口未就绪',
+    原文: Array(5).fill('Failed to load resource: the server responded with a status of 404 (Not Found)'),
+    主机: [],
+    应: { 真错误: 0, 接口未就绪: 5, 外网不可达: 0 }
+  }
+]
+
 function 自证() {
   let 坏 = 0
-  console.log('=== 自证：合成的页面结论行 ===')
+  console.log('=== 自证：控制台错误分类 ===')
+  for (const c of 分类样本) {
+    const got = 分类消息(c.原文, new Set(c.主机))
+    const 实际 = { 真错误: got.真错误.length, 接口未就绪: got.接口未就绪.length, 外网不可达: got.外网不可达.length }
+    const ok = Object.keys(c.应).every((k) => c.应[k] === 实际[k])
+    if (!ok) 坏++
+    console.log(`  ${ok ? '✓' : '✗'} ${c.name}`)
+    if (!ok) console.log(`      期望 ${JSON.stringify(c.应)}，实际 ${JSON.stringify(实际)}`)
+  }
+
+  console.log('\n=== 自证：合成的页面结论行 ===')
   for (const c of 自证样本) {
     const 违规 = 判(c.行, PAGES.length)
     const 报了几条 = 违规.length
@@ -152,7 +256,8 @@ function 自证() {
       )
     }
   }
-  console.log(坏 ? `\n✗ 自证 ${坏}/${自证样本.length} 项不通过` : `\n✓ 自证 ${自证样本.length} 项全过`)
+  const 共 = 自证样本.length + 分类样本.length
+  console.log(坏 ? `\n✗ 自证 ${坏}/${共} 项不通过` : `\n✓ 自证 ${共} 项全过`)
   return 坏
 }
 
@@ -173,20 +278,24 @@ const summary = []
 
 for (const [path, name] of PAGES) {
   const page = await newLoggedInPage(browser, session, { viewport: { width: 1920, height: 1080 } })
-  const errs = []
-  const apiMisses = []
+  // 先收**原文**，分类留到本页跑完再做（理由见 `分类消息` 的注释）
+  const 原文 = []
+  const 失败主机 = new Set()
   const failed = []
 
   page.on('console', (m) => {
     if (m.type() !== 'error') return
-    const text = m.text().replace(/\s+/g, ' ').slice(0, 110)
-    // 后端未就绪时接口首次 404 是预期行为（请求层会自动降级到内置数据），
-    // 单独归类，不混进真实错误里造成误报
-    if (text.includes('404') || text.includes('/api/')) apiMisses.push(text)
-    else errs.push(text)
+    原文.push(m.text().replace(/\s+/g, ' ').slice(0, 110))
   })
-  page.on('pageerror', (e) => errs.push('PAGEERROR ' + String(e).slice(0, 110)))
-  page.on('requestfailed', (r) => failed.push(r.url().slice(-60)))
+  page.on('pageerror', (e) => 原文.push('PAGEERROR ' + String(e).slice(0, 110)))
+  page.on('requestfailed', (r) => {
+    failed.push(r.url().slice(-60))
+    try {
+      失败主机.add(new URL(r.url()).host)
+    } catch {
+      /* data: / blob: 之类没有 host，忽略 */
+    }
+  })
   // 页面现在默认要登录，会话由上面的 newLoggedInPage 注入（见 lib/session.mjs）
 
   await page.goto(base + '/#' + path, { waitUntil: 'domcontentloaded', timeout: 90000 })
@@ -237,7 +346,12 @@ for (const [path, name] of PAGES) {
     shotErr = String(err.message || err).replace(/\s+/g, ' ').slice(0, 110)
   }
 
-  summary.push({
+  // 分类放在截屏之后：那条 tile.googleapis.com 的超时实测在 **87 秒**才到，
+  // 而截图（软渲染 60~120 秒）正是它落进来的窗口 —— 早于截图分类就会漏掉它，
+  // 也就复现不出这个坑。见第十三节第 37 条。
+  const { 真错误: errs, 接口未就绪: apiMisses, 外网不可达: 外网断 } = 分类消息(原文, 失败主机)
+
+  const row = {
     页面: name,
     面板: stats.panels,
     图表: stats.charts,
@@ -246,10 +360,16 @@ for (const [path, name] of PAGES) {
     滚动条: stats.docHeight > stats.winHeight ? `溢出 ${stats.docHeight - stats.winHeight}px` : '无',
     错误: errs.length,
     接口未就绪: apiMisses.length,
+    外网不可达: 外网断.length,
     三维报错面板: panel,
     渲染失败: renderErr,
     截图失败: shotErr
-  })
+  }
+  /* 只报「1 条错误」这个数字，排障就得从零开始 —— 说不出是谁、长什么样。
+     2026-09-18 它两次报「2/10 个页面各有 1 条错误」，却没有任何线索可查，
+     探针复现又抓不到。把原文带上，下次再红，看一眼就知道去哪儿找。 */
+  if (errs.length) row.错误明细 = errs.slice(0, 5)
+  summary.push(row)
 
   await page.close()
 }

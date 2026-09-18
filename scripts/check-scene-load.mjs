@@ -36,8 +36,21 @@ import { login, newLoggedInPage } from './lib/session.mjs'
 
 const base = process.argv[2] || 'http://localhost:8787'
 
-/** A3 的耗时上限（ms）。实测 1.1s，放宽到 20s：够抓「永远建不完」，又不受慢机器影响 */
-const BUILD_BUDGET_MS = 20000
+/**
+ * A3 的耗时上限（ms）。
+ *
+ * 原值 20000，理由是「实测 1.1s，留足余量够抓『永远建不完』」。
+ * 2026-09-18 起默认打开在线实景三维（见 .env.example），它给建场景加了一个
+ * **确定的** 15 秒：该资产的数据托管在 `tile.googleapis.com`（Google），
+ * 国内网络连不上，要等 `ONLINE_3D_TIMEOUT_MS` 到点才回退程序化场景。
+ * 实测 17851ms —— 离 20000 只剩 2.1 秒余量，机器稍慢就会假红。
+ *
+ * 放宽到 30000 **不是为了让某一次变绿**：A3 抓的是「永远建不完」（曾经的病根是
+ * 410 个采样点各自重取同一张瓦片，96 秒时实体仍是 0 个），那是个无限的过程，
+ * 30 秒和 20 秒一样抓得到。真正量「预热有没有生效」的是 A2（新取瓦片 0 张），
+ * 那条**一个字没动**。
+ */
+const BUILD_BUDGET_MS = 30000
 /** 原破坏性兜底的触发窗口（ms）。必须跨过它再验 B，否则测不到 */
 const FALLBACK_WINDOW_MS = 12000
 
@@ -138,7 +151,18 @@ checks.push([`[B1] 底图初始挂载完好（globe.show=${before.globeShow} 图
 
 // 真滚轮：缩出去再放大回来，模拟用户那条操作路径
 const canvas = page.locator('canvas').first()
-await canvas.hover()
+
+/* ⚠️ 这里**不要**用 `canvas.hover()`。它除了挪指针，还要做 Playwright 那套
+   「可见且稳定」的可操作性检查，而那个检查由注入脚本的 rAF 驱动 —— 会被
+   Cesium + SwiftShader 的全屏渲染循环饿死，卡满 30 秒超时。报错停在 hover 上，
+   看着像页面坏了，其实元素好好的（同源的坑见 lib/click.mjs 头部与 §13 第 31 条）。
+   实测 2026-09-18：默认打开在线三维之后，多出来的那 15 秒超时窗口让它稳定复现。
+
+   这里需要的只是「把指针挪到画布上」，好让下面的 wheel 滚画布而不是滚页面。
+   `page.mouse.move` 是原始输入、不做任何可操作性检查，正合适。 */
+const box = await canvas.boundingBox()
+if (!box) throw new Error('画布没有边界框：页面还没渲染出来就去滚轮了')
+await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
 await page.mouse.wheel(0, 2400) // 缩小
 await page.waitForTimeout(1200)
 const zoomedOut = await imageryState()

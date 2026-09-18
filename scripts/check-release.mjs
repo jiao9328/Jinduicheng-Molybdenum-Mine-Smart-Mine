@@ -19,6 +19,17 @@
  * `assets/cesium-*.js` 与 `assets/createViewer-*.js`。它没有报错、没有告警、
  * 肉眼也看不出来（那是个 300 字符的 JWT），只能逐个值去搜。
  *
+ * ── 那次是事故，现在是决定 ──
+ * 2026-09-18 起，`VITE_CESIUM_ION_TOKEN` **刻意**随包发布：Cesium Ion 令牌
+ * 本来就是浏览器里用的（访客打开 devtools 就能读到），真正的防护是 Ion 后台的
+ * **域名白名单**，不是把它藏起来。发布它是为了让下载者开箱就有实景三维。
+ *
+ * 所以这一组不再是「什么都不许进」，而是「**只有清单上的那个可以进**」——
+ * 允许清单见 PUBLIC_BY_DESIGN。它只许装「供浏览器直接使用、且已在服务方后台
+ * 做了来源限制」的令牌；`DUNER_LLM_KEY` 这种服务端密钥永远不许进去。
+ * 这两条都有正向对照：漏了令牌 → 在线三维**静默**退回程序化场景（兜底是设计如此，
+ * 所以不会报错，只会悄悄变差）；混进密钥 → 直接判红。
+ *
  * ## 为什么检查「dist 过没过期」不用文件时间戳
  *
  * 时间戳在**新克隆的仓库里不可信**：git 按索引顺序逐个写文件，`dist/` 排在
@@ -96,28 +107,92 @@ function findLeaks(files, secrets) {
   return leaks
 }
 
-/* ---------- 自证：先证明 D 组那条判据有分辨力，再谈它是不是绿的 ---------- */
-if (process.argv.includes('--self-test')) {
-  /* 造一个**形状与长度都像**真令牌的假 JWT。刻意不读 .env：没配 .env 的人
-     也得能跑自证，而且自证本身不该碰真凭据。 */
-  const FAKE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.self-test-not-a-real-token-'.padEnd(96, 'A')
-  const ABSENT = 'a-value-that-is-in-no-sample-'.padEnd(64, 'B')
-  const dir = mkdtempSync(join(tmpdir(), 'mine-release-selftest-'))
-  writeFileSync(join(dir, 'leaked.js'), `const token = "${FAKE}"`)
-  writeFileSync(join(dir, 'clean.js'), 'const token = ""')
-  writeFileSync(join(dir, 'image.png'), FAKE) // 二进制：按设计不扫
+/**
+ * 允许随产物公开发布的变量 —— **白名单，只许装这一个**。
+ *
+ * `VITE_CESIUM_ION_TOKEN` 是 Cesium Ion 的访问令牌，浏览器里用，设计上就藏不住：
+ * 它被内联进前端 bundle，任何访客打开 devtools 都能读到。正确的防护是在
+ * Ion 后台给它配**域名白名单**（这样别人抄走也用不了），而不是假装它不存在。
+ *
+ * 本仓库从 2026-09-18 起刻意发布它，好让下载者 `node server/index.mjs`
+ * 就有 Google 实景三维。要换成自己的，改 `.env` 即可。
+ *
+ * ⚠️ 往这个集合里加东西之前先问一句：**这个值被全世界看到，会怎样？**
+ * 答不上来就别加。`DUNER_LLM_KEY` 就是反例 —— 它进了包等于公开，
+ * 而且不会有任何报错：墩儿只是不再调用模型、静默退回规则引擎，
+ * 功能"看着还是好的"。
+ */
+const PUBLIC_BY_DESIGN = new Set(['VITE_CESIUM_ION_TOKEN'])
 
-  const found = findLeaks(walk(dir), [
-    ['.env 的假令牌', FAKE],
-    ['.env 里不存在的串', ABSENT]
-  ])
-  const hit = (label) => found.some((l) => l.label === label)
+/**
+ * 把一份 `.env` 文本分成「可公开」与「必须保密」两类。
+ *
+ * 抽成纯函数是为了能自证：允许清单写错（比如手滑把 `DUNER_LLM_KEY` 也放进去）时，
+ * 常规自检**照样全绿** —— 它只是少报一个泄漏而已。只有喂合成样本才看得出来。
+ *
+ * 短值（长度 < 16）一律丢弃：`true` / `/api` 这种满仓库都是，留着只会误报。
+ */
+function classifyEnv(text) {
+  const secrets = []
+  const publicValues = []
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trimStart().startsWith('#')) continue
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$/.exec(line)
+    if (!m) continue
+    const [, name, value] = m
+    if (value.length < 16) continue
+    ;(PUBLIC_BY_DESIGN.has(name) ? publicValues : secrets).push([name, value])
+  }
+  return { secrets, publicValues }
+}
+
+/* ---------- 自证：先证明 D 组的判据有分辨力，再谈它是不是绿的 ---------- */
+if (process.argv.includes('--self-test')) {
+  /* 造**形状与长度都像**真凭据的假值。刻意不读 .env：没配 .env 的人也得能跑自证，
+     而且自证本身不该碰真凭据。 */
+  const FAKE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.self-test-not-a-real-token-'.padEnd(96, 'A')
+  const KEY = ('sk-' + 'self-test-not-a-real-key-'.repeat(3)).slice(0, 48)
+  const ABSENT = 'a-value-that-is-in-no-sample-'.padEnd(64, 'B')
+
+  /* ── 第一段：分类。这一段是这轮新加的 —— 允许清单是**新的失效方式**：
+     清单里多一个名字，常规自检照样全绿，只是从此不再报那个值。 ── */
+  const ENV_SAMPLE = [
+    '# DUNER_LLM_KEY=' + KEY, // 注释掉的：不许被当成配置读进来
+    'VITE_CESIUM_ION_TOKEN=' + FAKE,
+    'DUNER_LLM_KEY=' + KEY,
+    'VITE_SOMETHING_NEW=' + ABSENT, // 没见过的变量：默认按保密处理
+    'VITE_USE_ONLINE_3D=true', // 短值：会被长度门槛滤掉
+    'VITE_API_BASE_URL=/api', // 同上
+    ''
+  ].join('\n')
+  const { secrets, publicValues } = classifyEnv(ENV_SAMPLE)
+  const names = (list) => list.map(([n]) => n)
+
+  /* ── 第二段：扫描。 ── */
+  const dir = mkdtempSync(join(tmpdir(), 'mine-release-selftest-'))
+  writeFileSync(join(dir, 'leaked.js'), `const key = "${KEY}"`) // 真该报的
+  writeFileSync(join(dir, 'published.js'), `const token = "${FAKE}"`) // 已公开的，不该报
+  writeFileSync(join(dir, 'clean.js'), 'const token = ""')
+  writeFileSync(join(dir, 'image.png'), KEY) // 二进制：按设计不扫
+
+  /* 只把「必须保密」那一类喂进去 —— 正是 D 组的接法 */
+  const found = findLeaks(walk(dir), [...secrets, ['样本里没有的值', ABSENT]])
+  const hitName = (n) => found.some((l) => l.label === n)
 
   const cases = [
-    ['正例 令牌原样在 .js 里 → 必须报', hit('.env 的假令牌')],
-    ['反例 同一个令牌只在 .png 里 → 不许报（二进制不在扫描范围）', !found.some((l) => l.file.endsWith('.png'))],
-    ['反例 干净文件不许报', !found.some((l) => l.file.endsWith('clean.js'))],
-    ['反例 样本里根本没有的值不许报（防乱报）', !hit('.env 里不存在的串')]
+    ['分类 正例 没见过的变量默认归入保密（默认保密，不是默认公开）', names(secrets).includes('VITE_SOMETHING_NEW')],
+    ['分类 正例 DUNER_LLM_KEY 归入保密', names(secrets).includes('DUNER_LLM_KEY')],
+    ['分类 正例 VITE_CESIUM_ION_TOKEN 归入可公开', names(publicValues).includes('VITE_CESIUM_ION_TOKEN')],
+    ['分类 反例 注释行里的赋值不算配置', secrets.filter(([, v]) => v === KEY).length === 1],
+    [
+      '分类 反例 短值（true / /api）不许进任何清单，否则到处误命中',
+      ![names(secrets), names(publicValues)].flat().some((n) => n === 'VITE_USE_ONLINE_3D' || n === 'VITE_API_BASE_URL')
+    ],
+    ['扫描 正例 保密值原样在 .js 里 → 必须报', hitName('DUNER_LLM_KEY')],
+    ['扫描 反例 已公开的令牌在 .js 里 → 不许报（允许清单真的生效了）', !hitName('VITE_CESIUM_ION_TOKEN')],
+    ['扫描 反例 同一个值只在 .png 里 → 不许报（二进制不在扫描范围）', !found.some((l) => l.file.endsWith('.png'))],
+    ['扫描 反例 干净文件不许报', !found.some((l) => l.file.endsWith('clean.js'))],
+    ['扫描 反例 样本里根本没有的值不许报（防乱报）', !hitName('样本里没有的值')]
   ]
 
   rmSync(dir, { recursive: true, force: true })
@@ -127,10 +202,10 @@ if (process.argv.includes('--self-test')) {
   console.log('='.repeat(64))
   const bad = cases.filter(([, ok]) => !ok)
   if (bad.length) {
-    console.log('\n✗ 自证失败：凭据扫描的判据没有分辨力')
+    console.log('\n✗ 自证失败：分类或扫描的判据没有分辨力')
     process.exit(1)
   }
-  console.log(`\n✓ 自证通过：${cases.length} 条样本该报的报、该放行的放行`)
+  console.log(`\n✓ 自证通过：${cases.length} 条样本，该报的报、该放行的放行、该保密的没被放进公开清单`)
   process.exit(0)
 }
 
@@ -237,35 +312,61 @@ check(
 // ---------------------------------------------------------------------------
 // D 组：凭据有没有混进产物
 // ---------------------------------------------------------------------------
-/* `.env` 里的值就是「用户说了不能上传的东西」的全部。太短的（如 `false`）会到处
-   误命中，所以设一个长度门槛；剩下的逐个在产物里搜原文。 */
+/* `.env` 里的值分两类（分类规则见 classifyEnv）：可公开的与必须保密的。 */
 const secrets = []
+const publicValues = []
 for (const file of ['.env', '.env.local']) {
   const p = join(ROOT, file)
   if (!existsSync(p)) continue
-  for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
-    if (line.trimStart().startsWith('#')) continue
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$/.exec(line)
-    if (!m) continue
-    const [, name, value] = m
-    if (value.length >= 16) secrets.push([`${file} 的 ${name}`, value])
-  }
+  const c = classifyEnv(readFileSync(p, 'utf8'))
+  for (const [name, value] of c.secrets) secrets.push([`${file} 的 ${name}`, value])
+  for (const [name, value] of c.publicValues) publicValues.push([`${file} 的 ${name}`, value])
 }
 
 const files = walk(DIST)
+
+/* D1 保密值一个都不许进产物 —— 「`.env` 不能传上去」这句话的全部内容 */
 const leaks = findLeaks(files, secrets)
 check(
-  `D .env 里的 ${secrets.length} 个值都没进 dist/（扫了 ${files.length} 个文本产物）`,
+  `D .env 里 ${secrets.length} 个保密值都没进 dist/（扫了 ${files.length} 个文本产物）`,
   leaks.length === 0,
   `这些值被内联进产物了，提交上去等于公开：\n      ${leaks
     .map((l) => `${l.label} → ${l.file.slice(ROOT.length)}`)
     .join('\n      ')}\n` +
-    '      修法：`VITE_CESIUM_ION_TOKEN= npm run build`（进程环境变量优先于 .env 文件），' +
-    '或临时把 .env 移开再构建'
+    '      修法：把它从构建里去掉。确属「浏览器要用、且已在服务方后台做了来源限制」的' +
+    '令牌，才加进 PUBLIC_BY_DESIGN 并写清理由 —— 别为了让这条变绿而放宽它'
 )
 
+/* D2 正向对照：公开令牌**必须**在产物里。
+   缺了它不会报错：online3d 会静默退回程序化场景，功能「看着还是好的」，
+   下载者打开页面才发现实景三维没了 —— 正是本仓库最防的那类「不报错的错」。 */
+if (publicValues.length) {
+  const present = findLeaks(files, publicValues)
+  check(
+    `D 公开令牌确实在产物里（${publicValues.map(([l]) => l.split(' 的 ')[1]).join('、')}）`,
+    present.length === publicValues.length,
+    '令牌没被内联进 dist/：构建时 .env 没被读到，或被空值覆盖了。' +
+      '在线三维会静默退回程序化场景、不报错。重新 npm run build 并提交 dist/'
+  )
+}
+
+/* D3 模板里也得带着它 —— 下载者 `cp .env.example .env` 之后重建才拿得到。
+   这条防的是一个真空洞：模板里令牌为空时，对方构建出的产物没有令牌，而本脚本
+   在**他的机器上**会因为 .env 里没有长值而跳过 D2，**照样判绿**。 */
+const EXAMPLE = join(ROOT, '.env.example')
+if (existsSync(EXAMPLE)) {
+  check(
+    'D .env.example 里带着公开令牌（别人 cp 之后重建才不会静默丢掉它）',
+    classifyEnv(readFileSync(EXAMPLE, 'utf8')).publicValues.length > 0,
+    '.env.example 里的 VITE_CESIUM_ION_TOKEN 是空的：别人 cp 出来重建，' +
+      '产物里就没有令牌了，而那时 D2 会被跳过、判绿'
+  )
+}
+
+/* D4 `.env` 本身仍不许入库 —— 它除了公开令牌，还有 DUNER_LLM_KEY。
+   `.env.example` 是模板，带着公开令牌，那是要入库的。 */
 const envTracked = git(['ls-files', '--', '.env', '.env.local'])
-check('D .env 没有被 git 跟踪', envTracked === '', `已被跟踪：${envTracked}`)
+check('D .env 没有被 git 跟踪（.env.example 是模板，可以入库）', envTracked === '', `已被跟踪：${envTracked}`)
 
 // ---------------------------------------------------------------------------
 // E 组：真起一次服务 —— 零依赖、种子自动就位、演示账号能登录
