@@ -169,7 +169,12 @@ const server = createServer(async (req, res) => {
         bearer: bearerToken(req),
         user: currentUser(db, req)
       }
-      const result = handleRequest(ctx)
+      // ⚠️ `await` 不能省。墩儿的对话路由是**异步**的（要调模型、要等超时），
+      // 少了这个 await 拿到的是 Promise 而不是 `{status, body}`，
+      // 于是 `result.status` 是 undefined，`res.writeHead(undefined, …)` 抛
+      // ERR_HTTP_INVALID_STATUS_CODE —— 而它只在真正走到 AI 那条路时才出现。
+      // 既有的同步路由不受影响：await 一个非 Promise 值原样返回。
+      const result = await handleRequest(ctx)
       sendJson(res, result.status, result.body)
     } catch (err) {
       const status = err?.status ?? 500

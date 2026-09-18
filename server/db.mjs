@@ -119,6 +119,49 @@ CREATE TABLE IF NOT EXISTS decision_orders (
   "due"        TEXT NOT NULL DEFAULT '',
   "createdAt"  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+-- 墩儿（AI 助手）用的两张表。DDL 放在这里而不是 server/duner/ 里，
+-- 是因为**建表只能有一个入口**：分散成两处，加表的人漏调一次
+-- 那个 init 函数，表就不存在，而报错要等到第一次真正用到才炸。
+
+-- 矿山术语词典（指导书第 5 节）。term 是标准词，synonyms 是 JSON 数组。
+-- builtin 标出"平台自带"还是"管理员加的" —— 种子只补缺不覆盖，
+-- 所以这个标记是用来让人分辨"这条是我改的还是自带的"，不参与任何逻辑分支。
+CREATE TABLE IF NOT EXISTS dict_term (
+  "id"        INTEGER PRIMARY KEY AUTOINCREMENT,
+  "term"      TEXT NOT NULL UNIQUE,
+  "category"  TEXT NOT NULL DEFAULT '',
+  "synonyms"  TEXT NOT NULL DEFAULT '[]',
+  "builtin"   INTEGER NOT NULL DEFAULT 0,
+  "updatedAt" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- 待确认的写操作（指导书第 2 节第 2 条）。
+--
+-- 为什么落库而不是放一个进程内的 Map —— 后者看着够用（单进程、单线程），
+-- 但一次性兑换会有一个真实的竞态窗口：POST /api/duner/confirm 是异步的，
+-- 校验 token 与标记已用之间隔着 await（要执行工具、要写库）。
+-- 两个并发的同 token 请求可以双双通过校验。
+-- 落库之后兑换就是一条 UPDATE ... WHERE token=? AND redeemed=0，
+-- 拿 changes 当闸门：单条 SQL 内完成判定与置位，窗口不存在。
+--
+-- expires_at 存毫秒时间戳（不是文本）：判断过期要做数值比较，
+-- 存 ISO 串就得在 SQL 里比字符串，跨时区/跨格式迟早出错。
+--
+-- ⚠️ 上面的注释里**不要出现反引号**。整段 SCHEMA 是一个 JS 模板字符串，
+-- 一个反引号就会把它提前截断，报错是
+-- 「SyntaxError: Unexpected identifier」指向注释里的某个英文单词 ——
+-- 看起来像 SQL 写坏了，其实是被当成 JS 了。
+CREATE TABLE IF NOT EXISTS pending_confirm (
+  "token"      TEXT    PRIMARY KEY,
+  "user_id"    INTEGER NOT NULL REFERENCES users("id"),
+  "username"   TEXT    NOT NULL,
+  "intent"     TEXT    NOT NULL,
+  "payload"    TEXT    NOT NULL DEFAULT '{}',
+  "created_at" INTEGER NOT NULL,
+  "expires_at" INTEGER NOT NULL,
+  "redeemed"   INTEGER NOT NULL DEFAULT 0
+);
 `
 
 // ---------------------------------------------------------------------------

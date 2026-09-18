@@ -286,7 +286,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
 import * as Cesium from 'cesium'
 import AppHeader from '@/components/AppHeader.vue'
@@ -304,6 +304,7 @@ import {
 } from '@/scene/layers/emergencyLayer'
 import { sampleGroundHeights } from '@/scene/localTerrain'
 import { MINE_ELEVATION, type SceneWaypoint } from '@/scene/sceneConfig'
+import { registerLayers, unregisterLayers } from '@/duner/scene'
 import { areaGradient, barGradient, CHART_COLORS, fadeColor, TEXT_MUTED_COLOR } from '@/utils/chartTheme'
 import { useAsyncData } from '@/hooks/useAsyncData'
 import { useUserStore } from '@/stores/user'
@@ -607,9 +608,17 @@ function applyLayerVisibility() {
   }
 }
 
-function toggleLayer(key: string) {
-  layerVisible.value = { ...layerVisible.value, [key]: layerVisible.value[key] === false }
+/**
+ * 显式开关。墩儿的图层指令要的是「设成开/关」而不是「toggle」——
+ * 说「打开基站图层」时它可能已经开着，翻转一下会把它关掉。
+ */
+function setLayer(key: string, visible: boolean) {
+  layerVisible.value = { ...layerVisible.value, [key]: visible }
   applyLayerVisibility()
+}
+
+function toggleLayer(key: string) {
+  setLayer(key, layerVisible.value[key] === false)
 }
 
 /**
@@ -773,6 +782,78 @@ const trendOption = computed<EChartsOption>(() => ({
     }
   ]
 }))
+
+// ---------------------------------------------------------------------------
+// 墩儿的图层登记（自然语言指挥层）
+// ---------------------------------------------------------------------------
+
+/**
+ * 图层名 → 本页的图层键。
+ *
+ * 三个固定层一对一；**避灾路线是一对多**（四条路线各自一个键，
+ * 面板上也是四行），所以单独走 `ROUTE_KEYS`。
+ */
+const LAYER_KEY: Record<string, string> = {
+  作业人员定位: 'personnel',
+  定位基站: 'stations',
+  人员当日轨迹: 'tracks'
+}
+const ROUTE_LAYER = '避灾路线'
+
+/** 图层手柄的 id。注销时比对，理由同 `MapScene` 那处（路由切换是先挂后卸） */
+const handleId = `emergency-${getCurrentInstance()?.uid ?? 0}`
+
+/** 现在能点到的路线键（数据到了才有，见上面那个 watch） */
+const routeKeys = () => disasterRoutes.value.map((r) => r.key).filter((k) => k in layerVisible.value)
+
+registerLayers({
+  id: handleId,
+
+  set(name, visible) {
+    if (name === ROUTE_LAYER) {
+      const keys = routeKeys()
+      if (!keys.length) return { ok: false, note: '避灾路线还没加载出来，稍后再试' }
+      for (const k of keys) setLayer(k, visible)
+      return { ok: true, note: `${visible ? '已显示' : '已隐藏'}避灾路线（${keys.length} 条）` }
+    }
+
+    const key = LAYER_KEY[name]
+    if (!key) return { ok: false, note: `应急救援页没有「${name}」这个图层，这里只有作业人员定位 / 定位基站 / 人员当日轨迹 / 避灾路线` }
+    setLayer(key, visible)
+    return { ok: true, note: `${visible ? '已打开' : '已关闭'}${name}` }
+  },
+
+  isolate(names) {
+    const known = names.filter((n) => n === ROUTE_LAYER || LAYER_KEY[n])
+    if (!known.length) return { ok: false, note: `本页没有这些图层：${names.join('、')}` }
+    if (known.length > 1) return { ok: false, note: '一次只看一层，请分开说' }
+
+    const only = known[0]
+    for (const [label, key] of Object.entries(LAYER_KEY)) setLayer(key, label === only)
+    for (const k of routeKeys()) setLayer(k, only === ROUTE_LAYER)
+    return { ok: true, note: `已只看${only}` }
+  },
+
+  list() {
+    const items = Object.entries(LAYER_KEY).map(([label, key]) => ({
+      name: label,
+      visible: layerVisible.value[key] !== false
+    }))
+    const keys = routeKeys()
+    if (keys.length) {
+      const on = keys.filter((k) => layerVisible.value[k] !== false)
+      // 部分显示时把条数写进名字里：只回「开/关」会漏掉「四条里显示了两条」这种情况
+      const partial = on.length > 0 && on.length < keys.length
+      items.push({
+        name: partial ? `${ROUTE_LAYER}（${keys.length} 条中 ${on.length} 条显示）` : ROUTE_LAYER,
+        visible: on.length > 0
+      })
+    }
+    return items
+  }
+})
+
+onBeforeUnmount(() => unregisterLayers(handleId))
 </script>
 
 <style lang="scss" scoped>

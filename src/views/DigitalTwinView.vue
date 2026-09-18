@@ -233,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import type { EChartsOption } from 'echarts'
 import type * as Cesium from 'cesium'
@@ -248,6 +248,7 @@ import {
   type TwinSlopeAnimation
 } from '@/scene/layers/twinLayer'
 import { SCENE_WAYPOINTS, type SceneWaypoint } from '@/scene/sceneConfig'
+import { registerLayers, registerSim, unregisterLayers, unregisterSim } from '@/duner/scene'
 import { AXIS_NAME_STYLE, CHART_COLORS, fadeColor } from '@/utils/chartTheme'
 import { useAsyncData } from '@/hooks/useAsyncData'
 import * as twinApi from '@/api/digitalTwin'
@@ -556,6 +557,95 @@ const slopeOption = computed<EChartsOption>(() => ({
       : {})
   }))
 }))
+
+// ---------------------------------------------------------------------------
+// 墩儿的图层 / 模拟登记（自然语言指挥层）
+// ---------------------------------------------------------------------------
+
+/**
+ * 本页三组图层与底部 Tab 是**同一份状态**（`tab`），所以图层名的翻译
+ * 只需一张表：图层名 ↔ Tab 键。
+ */
+const LAYER_TAB: Record<string, TwinTabKey> = {
+  设备效率: 'device',
+  风险分布: 'risk',
+  边坡监测: 'slope'
+}
+const TAB_LABEL: Record<TwinTabKey, string> = {
+  device: '设备效率',
+  risk: '风险分布',
+  slope: '边坡监测'
+}
+
+/**
+ * 图层手柄的 id。注销时比对，理由与 `MapScene` 那处相同
+ * （路由切换是「新的先挂载、旧的后卸载」，不比对会清掉新页面刚登记的句柄）。
+ */
+const handleId = `digital-twin-${getCurrentInstance()?.uid ?? 0}`
+
+registerLayers({
+  id: handleId,
+
+  /**
+   * ⚠️ 「关掉某一组」在这一页**做不到**，而这不是缺陷、是三选一的必然：
+   * 三组图层互斥（`applyLayerVisibility` 只让当前 Tab 那组可见），
+   * 关掉当前组等于让三维变成空的。
+   *
+   * 所以这里**如实说明并给出可执行的下一步**（「直接切到要看的那组」），
+   * 而不是让 `tab` 停在一个没有可见图层的状态上 —— 用户会觉得三维坏了。
+   */
+  set(name, visible) {
+    const key = LAYER_TAB[name]
+    if (!key) return { ok: false, note: `数字孪生页没有「${name}」这个图层，这里只有设备效率 / 风险分布 / 边坡监测` }
+    if (!visible) {
+      if (tab.value !== key) return { ok: true, note: `${name}本来就是关的` }
+      return { ok: false, note: `本页三组图层是三选一的，没法单独关掉当前这组；直接说要看哪一组就行` }
+    }
+    selectTab(key)
+    return { ok: true, note: `已切到${name}` }
+  },
+
+  isolate(names) {
+    const keys = names.map((n) => LAYER_TAB[n]).filter(Boolean)
+    if (!keys.length) return { ok: false, note: `本页没有这些图层：${names.join('、')}` }
+    if (keys.length > 1) {
+      return { ok: false, note: '本页三组图层是三选一的，一次只能看一组' }
+    }
+    selectTab(keys[0])
+    return { ok: true, note: `已只看${TAB_LABEL[keys[0]]}` }
+  },
+
+  list() {
+    return TABS.map((t) => ({ name: t.label, visible: t.key === tab.value }))
+  }
+})
+
+registerSim({
+  id: handleId,
+  /**
+   * 启动边坡位移动态模拟。
+   *
+   * 先把 Tab 切到边坡：动画改的是边坡图层的坐标，在别的 Tab 上播放
+   * 用户是看不到任何东西的 —— 一句「已启动」配一屏没动静的画面，
+   * 比不执行还糟。
+   *
+   * `site` / `speed` 收下但**用不了**：本页的模拟是整层一起演示
+   * （`createSlopeAnimation` 没有按监测点或速度分档的入口），
+   * 所以不假装按参数播过，由桥接层在回话里说明。
+   */
+  startSim() {
+    if (!slopeAnim) return { ok: false, note: '边坡动画还没建好（三维场景仍在加载），稍后再试' }
+    if (tab.value !== 'slope') selectTab('slope')
+    simPlaying.value = true
+    slopeAnim.play()
+    return { ok: true, note: '已在数字孪生页启动边坡位移动态模拟' }
+  }
+})
+
+onBeforeUnmount(() => {
+  unregisterLayers(handleId)
+  unregisterSim(handleId)
+})
 </script>
 
 <style lang="scss" scoped>

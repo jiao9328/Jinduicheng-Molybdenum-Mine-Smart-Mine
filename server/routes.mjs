@@ -49,6 +49,9 @@ import {
   destroySession,
   purgeExpiredSessions
 } from './auth.mjs'
+import { chat, confirm, receipt, capabilities } from './duner/service.mjs'
+import { getDict, countDict, upsertTerm, deleteTerm } from './duner/dict.mjs'
+import { auditDict, recentAudit } from './duner/audit.mjs'
 
 const ok = (body, status = 200) => ({ status, body })
 const fail = (status, message) => ({ status, body: { message } })
@@ -224,8 +227,105 @@ const RESOURCE_ROUTES = Object.entries(RESOURCES).flatMap(([path, resource]) => 
   { method: 'DELETE', re: new RegExp(`^/${path}/([^/]+)$`), resource, handler: remove }
 ])
 
+// ---------------------------------------------------------------------------
+// 墩儿（AI 助手）—— 指导书 4.2 的五步链路
+// ---------------------------------------------------------------------------
+//
+// 这里的 handler **全是异步**的（要调模型、要等超时），所以 `handleRequest`
+// 也必须是 async 并且真的 await 它们。理由写在那个函数上，别改成同步。
+
+/**
+ * 一句话 → 意图 → 视图指令。
+ *
+ * **任何登录用户都能用**：导航和查询是只读的，真正的写操作闸门在
+ * `policy.mjs` 里按工具判（`readOnly: false` → 必须管理员 + 必须确认），
+ * 不在这里按角色拦。理由与 `requireAdmin` 那段注释同源 ——
+ * 在路由层统一拦「非 GET 即 403」，等于把「哪句话会写库」这件事
+ * 押在 HTTP 方法上，而对话接口的方法永远是 POST。
+ */
+async function dunerChat(ctx) {
+  const text = String(ctx.body?.text ?? '')
+  if (!text.trim()) return fail(400, 'text 不能为空')
+  // 超长输入截断而不是拒绝：大屏前的人是说话、粘贴，不是填表单，
+  // 因为粘贴长了就报错不如截断后如实告知（审计里存的是截断后的）。
+  const trimmed = text.slice(0, 500)
+  const res = await chat({ db: ctx.db, user: ctx.user, text: trimmed, context: ctx.body?.context })
+  return ok(res)
+}
+
+async function dunerConfirm(ctx) {
+  const token = String(ctx.body?.token ?? '')
+  if (!token) return fail(400, 'token 不能为空')
+  const res = await confirm({ db: ctx.db, user: ctx.user, token })
+  // 令牌无效/过期/已用 —— 是**请求本身**的问题，不是服务器故障。
+  // 回 409（冲突：这条令牌的状态和你以为的不一样）而不是 500，
+  // 前端才能把它当成一句可读的话展示给用户。
+  // 注意 HTTP 状态与 `res.ok` 是两件事：这里 ok 一定为 true（请求处理成功），
+  // 兑换是否成功看 `res.ok`。
+  return res.ok === false ? { status: 409, body: res } : ok(res)
+}
+
+function dunerReceipt(ctx) {
+  return ok(receipt(ctx.db, ctx.user, ctx.body ?? {}))
+}
+
+function dunerCapabilities(ctx) {
+  return ok(capabilities(ctx.db))
+}
+
+function dunerDictGet(ctx) {
+  return ok({ dict: getDict(ctx.db), count: countDict(ctx.db) })
+}
+
+function dunerDictPost(ctx) {
+  const denied = requireAdmin(ctx)
+  if (denied) return denied
+
+  const term = String(ctx.body?.term ?? '').trim()
+  if (!term) return fail(400, 'term 不能为空')
+  const synonyms = Array.isArray(ctx.body?.synonyms) ? ctx.body.synonyms.map((s) => String(s).trim()).filter(Boolean) : []
+  try {
+    const row = upsertTerm(ctx.db, { term, category: String(ctx.body?.category ?? ''), synonyms })
+    auditDict(ctx.db, ctx.user, { action: 'upsert', term, synonyms })
+    return ok(row)
+  } catch (err) {
+    if (err instanceof FieldError) return fail(400, err.message)
+    throw err
+  }
+}
+
+function dunerDictDelete(ctx) {
+  const denied = requireAdmin(ctx)
+  if (denied) return denied
+
+  const term = String(ctx.query?.term ?? '').trim()
+  if (!term) return fail(400, '缺少 term 参数')
+  const removed = deleteTerm(ctx.db, term)
+  if (!removed) return fail(404, `词典里没有「${term}」`)
+  auditDict(ctx.db, ctx.user, { action: 'delete', term, synonyms: [] })
+  return ok({ ok: true })
+}
+
+/** 审计查询 —— **只给管理员**：里面存的是所有人的原话 */
+function dunerAudit(ctx) {
+  const denied = requireAdmin(ctx)
+  if (denied) return denied
+
+  const limit = Math.min(Math.max(Number(ctx.query?.limit) || 50, 1), 200)
+  return ok({ rows: recentAudit(ctx.db, limit) })
+}
+
 const FIXED_ROUTES = [
-  { method: 'PUT', re: /^\/emergency\/hazards\/([^/]+)\/status$/, handler: advanceHazard }
+  { method: 'PUT', re: /^\/emergency\/hazards\/([^/]+)\/status$/, handler: advanceHazard },
+
+  { method: 'POST', re: /^\/duner\/chat$/, handler: dunerChat },
+  { method: 'POST', re: /^\/duner\/confirm$/, handler: dunerConfirm },
+  { method: 'POST', re: /^\/duner\/receipt$/, handler: dunerReceipt },
+  { method: 'GET', re: /^\/duner\/capabilities$/, handler: dunerCapabilities },
+  { method: 'GET', re: /^\/duner\/dict$/, handler: dunerDictGet },
+  { method: 'POST', re: /^\/duner\/dict$/, handler: dunerDictPost },
+  { method: 'DELETE', re: /^\/duner\/dict$/, handler: dunerDictDelete },
+  { method: 'GET', re: /^\/duner\/audit$/, handler: dunerAudit }
 ]
 
 /**
@@ -233,8 +333,12 @@ const FIXED_ROUTES = [
  *
  * 返回 `{ status, body }`，不碰 `res` —— 路由与 HTTP 分离，这样权限判定
  * 可以脱离服务器单独测（`scripts/check-auth.mjs` 就是这么用的）。
+ *
+ * **是 `async` 的**：墩儿的对话路由要等模型返回，命中那条路由时整个函数
+ * 就是一个 Promise。同步路由照旧 —— 它们返回的是值，`await` 拿到的是同一个值。
+ * 调用方（`server/index.mjs`）必须 `await`，理由写在那边。
  */
-export function handleRequest(ctx) {
+export async function handleRequest(ctx) {
   const { method, path } = ctx
 
   // 1. 公开路由：只有登录与健康检查，别的统统要先登录
@@ -254,7 +358,10 @@ export function handleRequest(ctx) {
 
     const params = { id: match[1] }
     try {
-      return route.handler({ ...ctx, params, resource: route.resource })
+      // await 写在 try 里面：异步 handler 抛出的错也要被这里接住。
+      // 写成 `return route.handler(...)` 的话拒绝会绕开这个 catch，
+      // FieldError 就翻不成 400 了 —— 表现是 AI 相关的接口偶发 500。
+      return await route.handler({ ...ctx, params, resource: route.resource })
     } catch (err) {
       if (err instanceof FieldError) return fail(400, err.message)
       throw err

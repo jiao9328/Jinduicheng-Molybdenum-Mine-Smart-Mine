@@ -159,6 +159,7 @@ import MapScene from '@/components/MapScene.vue'
 import { buildAreaMarkLayer, type AreaMark } from '@/scene/layers/areaMarkLayer'
 import { pitOffset } from '@/scene/mineLayout'
 import { HOME_WAYPOINT } from '@/scene/sceneConfig'
+import { highlightAt } from '@/scene/highlight'
 import { areaAnchor, parseEntityId, type ScenePick } from '@/scene/sceneTargets'
 import {
   AXIS_LINE_COLOR,
@@ -798,34 +799,12 @@ function clearPick() {
 // 高亮
 // ---------------------------------------------------------------------------
 
-/** 高亮尺寸与原值备份 —— 必须先存后改，否则还原时只能猜一个尺寸 */
-const HIGHLIGHT_PIXEL_SIZE = 22
-let highlightBackup: { entity: Cesium.Entity; size: number } | null = null
-
-function setEntityHighlight(id: string) {
-  const viewer = sceneRef.value?.viewer
-  // ⚠️ 判活用 viewer.isDestroyed()，**不要写 entity.isDestroyed()**：
-  // Cesium 的 Entity 类型上没有这个成员，编译不过（全库既有代码也都用 viewer 那一套）
-  if (!viewer || viewer.isDestroyed()) return
-
-  if (highlightBackup) {
-    const { entity, size } = highlightBackup
-    if (viewer.entities.contains(entity) && entity.point) {
-      entity.point.pixelSize = new Cesium.ConstantProperty(size)
-    }
-    highlightBackup = null
-  }
-
-  if (!id) return
-  const entity = viewer.entities.getById(id)
-  if (!entity?.point) return
-
-  const current = entity.point.pixelSize?.getValue(viewer.clock.currentTime)
-  if (typeof current !== 'number') return
-
-  highlightBackup = { entity, size: current }
-  entity.point.pixelSize = new Cesium.ConstantProperty(HIGHLIGHT_PIXEL_SIZE)
-}
+/**
+ * 高亮实现搬到了 `src/scene/highlight.ts`（三页原先各有一份逐字节相同的副本）。
+ * 搬走的理由是**备份必须只有一份**：墩儿的命令栏也高亮，两份备份会让
+ * 后还原的那个把高亮永久留在实体上。
+ */
+const setEntityHighlight = (id: string) => highlightAt(sceneRef.value?.viewer, id)
 
 </script>
 

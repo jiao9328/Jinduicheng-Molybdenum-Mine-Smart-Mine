@@ -10,9 +10,10 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue'
+import { getCurrentInstance, onBeforeUnmount, onMounted, watch } from 'vue'
 import * as Cesium from 'cesium'
 import { useCesium, type SceneBuilder } from '@/scene/useCesium'
+import { registerScene, unregisterScene } from '@/duner/scene'
 import type { SceneWaypoint } from '@/scene/sceneConfig'
 import type { ScenePick } from '@/scene/sceneTargets'
 
@@ -173,6 +174,40 @@ onBeforeUnmount(() => {
 
 // 供父组件驱动相机飞行
 defineExpose({ viewer, ready, flyTo, probeAt })
+
+// ---------------------------------------------------------------------------
+// 墩儿的场景登记（自然语言指挥层）
+// ---------------------------------------------------------------------------
+/**
+ * 把本实例的 viewer 与 flyTo 登记到 `src/duner/scene.ts` 的模块级总线上。
+ *
+ * 为什么需要：墩儿的命令栏挂在 `App.vue` 上，而 viewer 在**这里**，
+ * 两者不在同一棵子树里 —— 面板够不到任何 viewer，也就没法驱动相机
+ * （总线本身的取舍见 `src/duner/scene.ts` 顶部）。
+ *
+ * 登记的是**一个闭包**而不是当场的 viewer：建场景要好几秒，
+ * 挂载这一刻 `viewer.value` 还是 null。闭包每次读的是当下的值，
+ * 场景就绪后自动就能用，不需要在这里等 `ready`。
+ *
+ * 九个页面一次性全都有导航能力，**不用挨个改页面**。
+ */
+const sceneUid = `map-scene-${getCurrentInstance()?.uid ?? 0}`
+
+onMounted(() => {
+  registerScene({
+    id: sceneUid,
+    viewer: () => viewer.value,
+    flyTo: (wp, duration) => flyTo(wp, duration)
+  })
+})
+
+/**
+ * ⚠️ 注销**必须比对 id**：路由切换时 Vue 的顺序是「新的先挂载、
+ * 旧的后卸载」，所以旧页面的注销发生在新页面登记**之后**。
+ * 不比对就会把刚登记好的新场景顺手清掉 —— 表现是「切一次页之后
+ * 墩儿就不认路了」，而且只在切页后才出现，很难往这里想。
+ */
+onBeforeUnmount(() => unregisterScene(sceneUid))
 </script>
 
 <style lang="scss" scoped>

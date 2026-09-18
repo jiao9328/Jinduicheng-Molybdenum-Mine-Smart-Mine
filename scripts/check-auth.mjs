@@ -266,7 +266,8 @@ async function 界面检查(base) {
     await 普通页.close()
 
     // ---- 管理员：界面 CRUD + 刷新仍在 ----
-    const 管理页 = await 新页(await login(base))
+    const 管理会话 = await login(base)
+    const 管理页 = await 新页(管理会话)
     await 管理页.goto(`${base}/#/data-admin`, { waitUntil: 'domcontentloaded', timeout: 60000 })
     await 管理页.waitForSelector('.data-admin__tab', { timeout: 30000 })
     checks.push(判相等(await 管理页.evaluate(() => location.hash), '#/data-admin', '管理员进得去数据管理页'))
@@ -274,10 +275,14 @@ async function 界面检查(base) {
     const 行数 = () => 管理页.locator('.data-table .el-table__body tr').count()
     const 起始 = await 行数()
     checks.push([`质检记录表格渲染出 ${起始} 行`, 起始 > 0])
-    checks.push([
-      '页签条数与库一致（4 张表）',
-      (await 管理页.locator('.data-admin__tab').count()) === 4
-    ])
+    // 页签条数 = **后端台账表数**，从 /api/health 现取，不写死数字。
+    // 原先这里写死 `=== 4`，加了「决策工单」那张表之后它就一直红着 ——
+    // 红的原因不是页面坏了，是断言过期了。改成现取之后，加表它跟着走，
+    // **真少一个页签**（`v-for` 被改坏、RESOURCES 少一项）才会翻红。
+    // `> 0` 是防它退化成恒真：health 取不到时两边都会是 0。
+    const 台账表数 = Object.keys((await 调(base, 'GET', '/health')).payload?.tables ?? {}).length
+    const 页签数 = await 管理页.locator('.data-admin__tab').count()
+    checks.push([`页签条数与库里的台账表一致（${页签数} / ${台账表数}）`, 台账表数 > 0 && 页签数 === 台账表数])
 
     // 界面新增
     const 标记 = `界面探针-${Date.now()}`
@@ -321,6 +326,19 @@ async function 界面检查(base) {
     // 少了这一条，上面那句「普通用户看到 0 个」在**选择器过期、按钮压根不渲染**时
     // 也会绿 —— 那是本仓库记过的「恒真的死断言」（第 23、24 条）。
     // 必须有人量出「健康状态下它是存在的」。
+    //
+    // 前提要先摆好：按钮只在**非终态**的隐患行上渲染（`HAZARD_NEXT[h.status]`，
+    // 已处置是终态）。库里那四条是演示时被一条条点过来的，全成了「已处置」，
+    // 于是这条正向对照会红在一个**跟页面无关的理由**上（数据用完了）——
+    // 这跟断言过期是同一类失效。所以先把 #3 复位成种子里的状态
+    // （`src/mock/emergency.ts` 里 id 3 是「处置中」），幂等，且顺带
+    // 让应急救援页的演示恢复可用。
+    const 复位 = await 调(base, 'PUT', '/emergency/hazards/3/status', {
+      token: 管理会话.token,
+      body: { status: 'doing' }
+    })
+    checks.push(判状态(复位.status, 200, '把隐患 #3 复位成「处置中」（正向对照的前提）'))
+
     await 管理页.goto(`${base}/#/emergency`, { waitUntil: 'domcontentloaded', timeout: 90000 })
     await 管理页
       .waitForSelector('.emergency__hazard-act', { timeout: 60000 })

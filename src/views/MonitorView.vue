@@ -145,6 +145,7 @@ import {
 } from '@/scene/layers/twinLayer'
 import { buildPersonnelLayer } from '@/scene/layers/emergencyLayer'
 import { SCENE_WAYPOINTS, type SceneWaypoint } from '@/scene/sceneConfig'
+import { highlightAt } from '@/scene/highlight'
 import {
   areaAnchor,
   parseEntityId,
@@ -486,43 +487,12 @@ async function buildScene(viewer: Cesium.Viewer) {
 }
 
 /**
- * 三维高亮的原值。**必须先存后改**——不存原值就直接改小回去，
- * 会把设备点（10px）和边坡点（11px）统一压成同一个尺寸。
+ * 三维高亮。实现搬到了 `src/scene/highlight.ts`，本页只负责把 viewer 递进去。
+ *
+ * 搬走的理由不是「代码太长」，而是**备份必须只有一份**：墩儿的命令栏
+ * 也会高亮（它不属于任何视图），两份备份会让后还原的那个把高亮永久留下。
  */
-let highlightBackup: { entity: Cesium.Entity; size: number } | null = null
-const HIGHLIGHT_PIXEL_SIZE = 22
-
-function setEntityHighlight(id: string) {
-  const viewer = sceneRef.value?.viewer
-  /**
-   * ⚠️ 判活用 `viewer.isDestroyed()`，**不要写 `entity.isDestroyed()`**：
-   * Cesium 的 `Entity` 类型上根本没有这个成员（编译不过），而且真要说
-   * 「这个句柄还能不能用」，本来就该问 viewer——视图销毁时实体集合跟着没了。
-   * 全库既有代码（createViewer / twinLayer / useCesium）清一色用的也是这个判据。
-   */
-  if (!viewer || viewer.isDestroyed()) return
-
-  // 先还原上一个
-  if (highlightBackup) {
-    const { entity, size } = highlightBackup
-    // `entities.contains` 而不是「不是 null 就算在」：图层可能已被重建，
-    // 手里这个句柄指向的对象早就不在集合里了，此时写它的属性是静默无效的
-    if (viewer.entities.contains(entity) && entity.point) {
-      entity.point.pixelSize = new Cesium.ConstantProperty(size)
-    }
-    highlightBackup = null
-  }
-
-  if (!id) return
-  const entity = viewer.entities.getById(id)
-  if (!entity?.point) return
-
-  const current = entity.point.pixelSize?.getValue(viewer.clock.currentTime)
-  if (typeof current !== 'number') return
-
-  highlightBackup = { entity, size: current }
-  entity.point.pixelSize = new Cesium.ConstantProperty(HIGHLIGHT_PIXEL_SIZE)
-}
+const setEntityHighlight = (id: string) => highlightAt(sceneRef.value?.viewer, id)
 
 /** 拾取浮层的展示内容 */
 interface PickCard {
