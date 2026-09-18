@@ -25,7 +25,7 @@
  * 接口就绪后 mock 仍是**降级数据源**，两边的形状必须长期保持一致。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -33,6 +33,22 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 
 /** 库文件位置。`MINE_DB` 可覆盖（`:memory:` 用于自检，见 scripts/check-auth.mjs） */
 export const DB_PATH = process.env.MINE_DB ?? join(HERE, 'data', 'mine.db')
+
+/**
+ * 随仓库分发的**种子基线**库，只读不写。
+ *
+ * 为什么要有这么一个文件：灌种子的 `npm run db:seed` 要绕 esbuild 才读得了
+ * `src/mock/*.ts`，而 esbuild 在 node_modules 里 —— 也就是说**没装依赖的人跑不了
+ * 灌种子脚本**（`node server/index.mjs` 重开一个库也只会得到四张空台账）。
+ * 下载仓库的人应当开箱就有数据，所以把这份种子以现成库的形式带上。
+ *
+ * 为什么提交的是 `mine.seed.db` 而不是直接提交工作库 `mine.db`：
+ * `mine.db` 是**运行时一直被写**的文件 —— 每次登录、每条墩儿指令都往 `audit_log`
+ * 落一行。提交它等于让每个人的 `git status` 常驻一个脏的二进制文件；而这东西
+ * diff 不出内容，很容易顺手把一堆审计记录一起提交上去。种子库永不改动，
+ * 工作库由 `openDb` 首次启动时复制出来，两边各自干净。
+ */
+export const SEED_PATH = process.env.MINE_SEED ?? join(HERE, 'data', 'mine.seed.db')
 
 /**
  * 建表语句。全部 `IF NOT EXISTS`，重复启动不报错。
@@ -265,7 +281,16 @@ export const RESOURCES = {
 
 /** 打开库并确保表结构就位。目录不存在就建（首次 clone 后 server/data 不存在） */
 export function openDb(path = DB_PATH) {
-  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
+  if (path !== ':memory:') {
+    mkdirSync(dirname(path), { recursive: true })
+    /* 库文件还不存在就用种子基线初始化它，让「下载 → 解压 → 起服务」直接有数据。
+       判据是**文件存不存在**而不是路径等不等于默认值：这样 `--db 别的路径.db`
+       也有一份带演示数据的库，而「想回到基线」就是删掉它重启 —— 一条规则、
+       两种用法，不必记特例。`:memory:` 不走这里（自检脚本要的正是空库）。 */
+    if (!existsSync(path) && existsSync(SEED_PATH)) {
+      copyFileSync(SEED_PATH, path)
+    }
+  }
   const db = new DatabaseSync(path)
   db.exec('PRAGMA journal_mode = WAL')
   db.exec('PRAGMA foreign_keys = ON')

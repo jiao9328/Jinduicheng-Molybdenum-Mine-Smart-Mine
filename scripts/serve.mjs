@@ -6,10 +6,11 @@
  *   2) 起后端：**同一个进程、同一个端口**同时托管 dist/ 静态页与 /api
  *
  * 为什么要有这一层，而不是直接 `node server/index.mjs`：
- * dist/ 不入版本库，新克隆的仓库里没有它，直接起后端只会在访问 `/` 时
- * 返回一行「dist/ 不存在，先执行 npm run build」的纯文本——对「一键启动」
- * 来说这就是失败。本脚本把构建补上，并且**只在真的过期时才构建**，
- * 日常重复启动仍然是秒开。
+ * 版本库里带着一份构建好的 dist/（见 .gitignore 开头那段），但那只是一张
+ * **快照** —— 改了 src/ 它不会自己跟着变，而 vite 的产物文件名带内容哈希，
+ * 旧 index.html 指向的旧 chunk 与真实源码对不上，页面会以各种莫名其妙的方式坏掉。
+ * 本脚本先把快照与源头比一遍，只在真的过期时才重建，日常重复启动仍是秒开；
+ * 没装依赖的人则走 `node server/index.mjs`，直接吃那张快照。
  *
  * 构建走 node_modules 里的 vite，不经过 `npm run build`：那会先跑
  * vue-tsc 全量类型检查（慢，且类型错就起不来）。一键启动的目标是跑得起来，
@@ -70,8 +71,13 @@ function newestMtime(target) {
 /* ---------- 1) 依赖预检：没装依赖时给中文提示，而不是 'vite' 不是内部或外部命令 ---------- */
 if (!existsSync(VITE)) {
   console.error(
-    '\n[serve] 未安装依赖：找不到 node_modules/vite。\n' +
-      '        仓库刻意不含 node_modules，首次运行请先安装：\n' +
+    '\n[serve] 找不到 node_modules/vite —— 本命令负责「按需构建」，所以需要依赖。\n' +
+      '\n' +
+      '        只想跑起来看看（不装依赖、不联网都行）：\n' +
+      '            node server/index.mjs\n' +
+      '        仓库里带着构建好的 dist/ 与种子库，后端零第三方依赖，直接起得来。\n' +
+      '\n' +
+      '        要改源码、让 dist/ 跟着重建，再装依赖：\n' +
       '            npm install\n' +
       '        装好后重新执行 npm run serve。\n'
   )

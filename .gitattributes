@@ -1,0 +1,19 @@
+# 二进制资源不许做换行转换（本机 core.autocrlf=true）
+#
+# git 通常能自己认出二进制（扫开头有没有 NUL 字节），但这是**兜底**：
+# 认错一次就是把文件改坏，而且是静默的 —— 瓦片变花、wasm 编译不过，
+# 表象离原因很远。这里把明确知道的几类钉死。
+#
+# 尤其是 `*.db`：它随仓库分发（见 .gitignore 里的说明），一旦被当成文本
+# 做了 EOL 转换，下载者拿到的是个打不开的库，而报错只会说「file is not a database」。
+*.db      binary
+*.wasm    binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.glb     binary

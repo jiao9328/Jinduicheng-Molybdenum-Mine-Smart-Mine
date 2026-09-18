@@ -1,16 +1,13 @@
 node_modules
-dist
 dist-ssr
 *.local
 *.tsbuildinfo
 
-# 环境变量：含 Cesium Ion token 等凭据，绝不入库
+# 环境变量：含 Cesium Ion token、模型密钥等凭据，绝不入库
 .env
 .env.local
 .env.*.local
 
-# Cesium 静态资源由 postinstall 从 node_modules 拷贝，不入库
-public/cesium
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
@@ -19,14 +16,40 @@ public/cesium
 src/types/auto-imports.d.ts
 src/types/components.d.ts
 
-# ---- 数据库文件，不是源码 ----
+# ---- 以下三项随仓库分发：曾经写在下面被忽略，现在刻意不写规则了 ----
 #
-# SQLite 库（含 WAL 与 shm 两个伴生文件）由 `npm run db:seed` 生成，
-# 内容全部来自 src/mock/*.ts —— 也就是说**它完全可以重新生成**，
-# 没有任何一条信息是只存在于库里的。入库只会把二进制脏数据带进
-# 版本历史（每改一行就重新落一份整库，git 无法增量压缩）。
-# 另外它装的是 users 表，口令哈希与盐也不该进库。
-server/data/
+# 也就是说，看不到对应规则就是入库 —— 为的是「下载解压就能跑」。
+#
+# 后端 `server/index.mjs` 零第三方依赖（`node:http` + 内置 `node:sqlite`），
+# 于是只要**前端产物**与**运行时资源**在手上，一个没装 node_modules、
+# 也没联网的人执行 `node server/index.mjs` 就能把整个平台跑起来。
+# 这三项就是那个前提，缺一项下载者就得先 `npm install`：
+#
+#   dist/            前端构建产物。
+#                    ⚠️ 改完 src/ 必须重新 `npm run build` 再提交，否则别人下到的
+#                    是旧界面 —— 这是「提交产物」换来的代价，没有自动闸门兜底。
+#                    ⚠️ 重建前留意 `.env` 里的 `VITE_*`：vite 会把它们**内联进产物**，
+#                    提交带令牌的 dist/ 等于把 .env 传上去。发布前跑
+#                    `node scripts/check-release.mjs`，它会逐个值搜一遍 dist/。
+#   public/cesium/   Cesium 的 Worker 与贴图。运行时按 `CESIUM_BASE_URL` 动态加载，
+#                    不参与打包；只能从 node_modules/cesium 拷出来（postinstall
+#                    那一步），所以不带上它页面就转不出三维场景。
+#
+# 体积上不亏：dist/ 里的瓦片与 Cesium 资源跟 public/ 下的是同一份字节，
+# git 按内容去重，只多存一份 blob 索引。
+
+# ---- 数据库：只放行种子基线 ----
+#
+# 工作库 mine.db（带 -wal / -shm 两个伴生文件）是**运行时会一直被写**的：
+# 每次登录、每条墩儿指令都往 audit_log 落一行。它由 `openDb` 首次启动时从
+# mine.seed.db 复制而来，随时可以删掉重来，不该进版本库 —— 二进制文件 diff
+# 不出内容，只会把一堆审计记录悄悄带进来。
+#
+# mine.seed.db 反过来是只读的种子基线，**必须**在库里：没装依赖的人跑不了
+# `npm run db:seed`（它要 esbuild 才读得了 src/mock/*.ts），少了它下载者
+# 打开就是四张空台账。
+server/data/*
+!server/data/mine.seed.db
 
 # ---- 巡检脚本的产出，不是源码 ----
 #

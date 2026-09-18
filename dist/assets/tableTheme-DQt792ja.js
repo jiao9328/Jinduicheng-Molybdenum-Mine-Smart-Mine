@@ -1,0 +1,1 @@
+function r(){return{background:"var(--table-th-bg)",color:"var(--table-th-text)",fontSize:"var(--table-fs)",borderColor:"var(--table-border)"}}function e(){return{background:"transparent",color:"var(--table-cell-text)",fontSize:"var(--table-fs)",borderColor:"var(--table-border)"}}export{r as a,e as t};

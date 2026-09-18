@@ -1,0 +1,48 @@
+{
+  "asset": {
+    "version": "1.0",
+    "tilesetVersion": "demo"
+  },
+  "geometricError": 200.0,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        0,
+        20,
+        0,
+        200,
+        0,
+        0,
+        0,
+        60,
+        0,
+        0,
+        0,
+        200
+      ]
+    },
+    "geometricError": 0,
+    "refine": "ADD",
+    "content": {
+      "uri": "building.glb"
+    },
+    "transform": [
+      0.96225,
+      0,
+      -0.27217,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0.27217,
+      0,
+      0.96225,
+      0,
+      0,
+      0,
+      0,
+      1
+    ]
+  }
+}
